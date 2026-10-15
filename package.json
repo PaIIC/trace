@@ -1,5 +1,5 @@
 {
-  "name": "site-creator-vinext-starter",
+  "name": "research-trace",
   "version": "0.1.0",
   "private": true,
   "engines": {
@@ -11,7 +11,12 @@
     "build": "node scripts/run-framework.mjs build",
     "start": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx tests/core.test.mjs",
+    "test:e2e": "playwright test",
+    "db:setup": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_gigantic_mole_man.sql",
+    "format": "prettier --write app components/notebook.tsx components/notebook-parts.tsx lib/ai.ts lib/domain.ts lib/server.ts lib/ideas-repository.ts db/schema.ts tests playwright.config.ts README.md"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

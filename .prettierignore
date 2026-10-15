@@ -1,0 +1,8 @@
+node_modules
+dist
+.wrangler
+.sites-runtime
+.vinext
+package-lock.json
+drizzle/meta
+test-results

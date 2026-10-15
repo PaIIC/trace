@@ -1,8 +1,16 @@
 import { parseAnalysis } from "./domain.ts";
 import type { Analysis } from "./domain.ts";
 
-export interface AIEnvironment { AI_API_KEY?: string; AI_BASE_URL?: string; AI_MODEL?: string }
-export interface AIConfig { key: string; baseURL: string; model: string }
+export interface AIEnvironment {
+  AI_API_KEY?: string;
+  AI_BASE_URL?: string;
+  AI_MODEL?: string;
+}
+export interface AIConfig {
+  key: string;
+  baseURL: string;
+  model: string;
+}
 
 export function getAIConfig(env: AIEnvironment): AIConfig | null {
   const key = env.AI_API_KEY?.trim();
@@ -12,8 +20,17 @@ export function getAIConfig(env: AIEnvironment): AIConfig | null {
   try {
     const url = new URL(baseURL);
     if (url.username || url.password || url.search || url.hash) return null;
-    if (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) return null;
-  } catch { return null; }
+    if (
+      url.protocol !== "https:" &&
+      !(
+        url.protocol === "http:" &&
+        ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+      )
+    )
+      return null;
+  } catch {
+    return null;
+  }
   return { key, baseURL, model };
 }
 
@@ -22,28 +39,44 @@ export const ANALYSIS_PROMPT = `你是一位审慎的科研思考助手。分析
 
 export class AnalysisError extends Error {}
 
-export async function analyzeIdea(content: string, config: AIConfig, fetcher: typeof fetch = fetch): Promise<Analysis> {
+export async function analyzeIdea(
+  content: string,
+  config: AIConfig,
+  fetcher: typeof fetch = fetch,
+): Promise<Analysis> {
   let response: Response;
   try {
     response = await fetcher(`${config.baseURL}/chat/completions`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.key}` },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.key}`,
+      },
       signal: AbortSignal.timeout(60000),
-      body: JSON.stringify({ model: config.model, messages: [
-        { role: "system", content: ANALYSIS_PROMPT },
-        { role: "user", content },
-      ] }),
+      body: JSON.stringify({
+        model: config.model,
+        messages: [
+          { role: "system", content: ANALYSIS_PROMPT },
+          { role: "user", content },
+        ],
+      }),
     });
   } catch {
-    throw new AnalysisError("暂时无法连接 AI 服务或请求超时。灵感已保存，可以稍后重试。");
+    throw new AnalysisError(
+      "暂时无法连接 AI 服务或请求超时。灵感已保存，可以稍后重试。",
+    );
   }
   if (!response.ok) {
-    if ([401, 403].includes(response.status)) throw new AnalysisError("AI 服务验证失败，请检查服务端密钥和模型权限。");
-    if (response.status === 429) throw new AnalysisError("AI 服务请求受限或额度不足，请稍后重试。");
+    if ([401, 403].includes(response.status))
+      throw new AnalysisError("AI 服务验证失败，请检查服务端密钥和模型权限。");
+    if (response.status === 429)
+      throw new AnalysisError("AI 服务请求受限或额度不足，请稍后重试。");
     throw new AnalysisError("AI 服务暂时无法完成分析，请检查模型配置后重试。");
   }
   try {
-    const result = await response.json() as { choices?: { message?: { content?: string } }[] };
+    const result = (await response.json()) as {
+      choices?: { message?: { content?: string } }[];
+    };
     const text = result.choices?.[0]?.message?.content;
     if (typeof text !== "string") throw new Error();
     return parseAnalysis(text);

@@ -5,7 +5,11 @@ export const ANALYSIS_LEASE_MS = 90_000;
 
 export const ideaInputSchema = z.object({
   id: z.string().uuid(),
-  content: z.string().trim().min(1, "写下一点想法再保存吧").max(MAX_CONTENT_LENGTH, "每条灵感最多 12,000 字"),
+  content: z
+    .string()
+    .trim()
+    .min(1, "写下一点想法再保存吧")
+    .max(MAX_CONTENT_LENGTH, "每条灵感最多 12,000 字"),
   tags: z.array(z.string().trim().min(1).max(24)).max(8).default([]),
 });
 
@@ -39,18 +43,31 @@ export interface Idea {
 }
 
 export function titleFromContent(content: string): string {
-  const firstLine = content.trim().split(/\n/)[0].replace(/^#+\s*/, "");
+  const firstLine = content
+    .trim()
+    .split(/\n/)[0]
+    .replace(/^#+\s*/, "");
   return firstLine.length > 42 ? `${firstLine.slice(0, 42)}…` : firstLine;
 }
 
 export function parseAnalysis(content: string): Analysis {
   if (content.length > 22000) throw new Error("模型返回内容过长，请重试。");
-  const cleaned = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const cleaned = content
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
   const parsed = analysisSchema.safeParse(JSON.parse(cleaned));
   if (!parsed.success) throw new Error("模型返回的分析格式不完整，请重试。");
   return parsed.data;
 }
 
-export function isAnalysisRunning(idea: Pick<Idea, "status" | "analysisStartedAt">, now = Date.now()) {
-  return idea.status === "processing" && !!idea.analysisStartedAt && now - Date.parse(idea.analysisStartedAt) < ANALYSIS_LEASE_MS;
+export function isAnalysisRunning(
+  idea: Pick<Idea, "status" | "analysisStartedAt">,
+  now = Date.now(),
+) {
+  return (
+    idea.status === "processing" &&
+    !!idea.analysisStartedAt &&
+    now - Date.parse(idea.analysisStartedAt) < ANALYSIS_LEASE_MS
+  );
 }
