@@ -9,7 +9,6 @@ import {
   ArrowUp,
   ArrowUpRight,
   Bookmark,
-  Check,
   CheckCheck,
   ChevronRight,
   Clock3,
@@ -30,6 +29,9 @@ import {
   X,
 } from "lucide-react";
 import type { Idea } from "@/lib/domain";
+import type { Connection } from "@/lib/connection-types";
+import { api, ApiError } from "@/lib/api-client";
+import { AISettings } from "./ai-settings";
 import { isAnalysisRunning, MAX_CONTENT_LENGTH } from "@/lib/domain";
 import {
   Activity,
@@ -44,47 +46,8 @@ import {
   TraceDrawing,
 } from "./notebook-parts";
 
-type Connection = {
-  configured: boolean;
-  model: string | null;
-  displayName: string;
-};
 type Draft = { id: string; content: string; tags: string };
 const DRAFT_KEY = "research-trace-draft";
-
-class ApiError extends Error {
-  status: number;
-  constructor(message: string, status: number) {
-    super(message);
-    this.status = status;
-  }
-}
-
-async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(path, options);
-  } catch {
-    throw new Error("网络暂时不可用，请检查连接后重试。");
-  }
-  let data;
-  try {
-    data = await response.json();
-  } catch {
-    throw new Error("服务暂时没有响应，请稍后重试。");
-  }
-  if (!response.ok)
-    throw new ApiError(
-      typeof data === "object" &&
-        data &&
-        "error" in data &&
-        typeof data.error === "string"
-        ? data.error
-        : "操作失败，请稍后重试。",
-      response.status,
-    );
-  return data as T;
-}
 
 export default function Notebook({
   initialIdeaId = null,
@@ -1130,7 +1093,7 @@ export default function Notebook({
                     <span
                       className={`mini-badge ${connection?.configured ? "ready" : ""}`}
                     >
-                      {connection?.configured ? "已连接" : "等待连接"}
+                      {connection?.configured ? "已配置" : "等待连接"}
                     </span>
                     <h3>给灵感一个新视角</h3>
                     <p>
@@ -1268,95 +1231,12 @@ export default function Notebook({
         </form>
       </Dialog>
 
-      <Dialog
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        title="AI 连接"
-        className="settings-dialog"
-      >
-        <div className="settings-intro">
-          <span className="orb">
-            <Sparkles size={25} />
-          </span>
-          <h2>
-            {connection?.configured ? "你的思考助手已就绪" : "连接一个思考助手"}
-          </h2>
-          <p>
-            支持 OpenAI 兼容接口。选择你熟悉的服务，
-            <br />
-            为灵感生成简洁的研究建议。
-          </p>
-        </div>
-        <div className="connection-status">
-          <span
-            className={`connection-dot ${connection?.configured ? "connected" : ""}`}
-          />
-          <span>
-            {connection?.configured
-              ? `已连接 · ${connection.model}`
-              : "尚未配置 AI 服务"}
-          </span>
-          <button
-            className="text-button"
-            onClick={async () => {
-              try {
-                const config = await api<Connection>("/api/config");
-                setConnection(config);
-                setToast(
-                  config.configured
-                    ? "AI 配置已就绪"
-                    : "尚未检测到完整的 AI 配置",
-                );
-              } catch (error) {
-                setToast((error as Error).message);
-              }
-            }}
-          >
-            刷新状态
-          </button>
-        </div>
-        <div className="settings-info">
-          <h3>连接后，你会获得</h3>
-          <div>
-            <Check size={14} />
-            核心研究问题与灵感概述
-          </div>
-          <div>
-            <Check size={14} />
-            潜在价值、可行路径与局限
-          </div>
-          <div>
-            <Check size={14} />
-            可以着手尝试的下一步
-          </div>
-        </div>
-        <details className="config-details">
-          <summary>
-            查看服务端配置方法
-            <ChevronRight size={15} />
-          </summary>
-          <p>
-            本地运行时，在项目目录创建 <code>.dev.vars</code>
-            ，填写服务地址、模型名称与密钥，然后重新启动网页。密钥不会进入浏览器，也不会提交到
-            Git。
-          </p>
-          <pre>
-            AI_BASE_URL="https://你的服务地址/v1"{"\n"}AI_MODEL="模型名称"{"\n"}
-            AI_API_KEY="你的密钥"
-          </pre>
-          <p>
-            如部署到
-            Sites，在站点的环境变量中配置同名字段并重新发布。未连接时，记录和回看功能照常可用。
-          </p>
-        </details>
-        <button
-          className="button primary full-width"
-          onClick={() => setSettingsOpen(false)}
-        >
-          继续记录我的想法
-          <ArrowRight size={16} />
-        </button>
-      </Dialog>
+      {settingsOpen && (
+        <AISettings
+          onClose={() => setSettingsOpen(false)}
+          onConnection={setConnection}
+        />
+      )}
 
       <Dialog
         open={deleteOpen}

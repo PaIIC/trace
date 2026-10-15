@@ -1,5 +1,4 @@
-import { env } from "cloudflare:workers";
-import { analyzeIdea, AnalysisError, getAIConfig } from "@/lib/ai";
+import { analyzeIdea, AnalysisError } from "@/lib/ai";
 import { HttpError, json, requestContext, routeError } from "@/lib/server";
 
 export async function POST(
@@ -7,11 +6,11 @@ export async function POST(
   context: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { user, repository } = await requestContext(request);
+    const { user, repository, connections } = await requestContext(request);
     const { id } = await context.params;
     const idea = await repository.find(user.userId, id);
     if (!idea) throw new HttpError(404, "这条灵感不存在或已经被删除。");
-    const config = getAIConfig(env);
+    const config = await connections.resolve(user.userId);
     if (!config)
       throw new HttpError(
         503,

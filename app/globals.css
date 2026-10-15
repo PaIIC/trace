@@ -1604,6 +1604,226 @@ kbd {
   margin-left: auto;
   font-size: 9px;
 }
+.settings-dialog .settings-intro {
+  padding: 18px 0 22px;
+}
+.settings-dialog .settings-intro h2 {
+  margin-top: 21px;
+}
+.settings-loading,
+.settings-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 13px;
+  padding: 14px;
+  line-height: 1.8;
+}
+.settings-load-error {
+  color: #995d49;
+}
+.connection-status > span:last-child {
+  overflow-wrap: anywhere;
+}
+.connection-form fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.connection-form fieldset:disabled {
+  opacity: 0.65;
+}
+.provider-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid #e3e8da;
+  padding: 20px 0;
+  margin-bottom: 20px;
+}
+.provider-mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #eaf0e3;
+  color: #71895b;
+}
+.provider-option > div {
+  flex: 1;
+}
+.provider-option strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+}
+.provider-option > div span {
+  display: block;
+  font-size: 11px;
+  color: #849077;
+  margin-top: 5px;
+}
+.provider-option > svg {
+  color: #71895b;
+}
+.connection-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.connection-form label {
+  display: block;
+  font-size: 12px;
+  color: #586c49;
+  margin-bottom: 10px;
+}
+.connection-label-row label {
+  margin: 0;
+}
+.connection-label-row a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: #6b8158;
+  text-decoration: none;
+}
+.connection-label-row a:hover {
+  text-decoration: underline;
+}
+.connection-key-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 0 13px;
+  min-height: 44px;
+  border: 1px solid #d9e0cf;
+  background: #fffef9;
+  border-radius: 6px;
+  color: #899b79;
+}
+.connection-key-field:focus-within {
+  outline: 2px solid #9eaf8a;
+  outline-offset: 2px;
+}
+.connection-key-field > svg {
+  flex-shrink: 0;
+}
+.connection-key-field input {
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  font-size: 14px;
+  color: #4e6241;
+  outline: none;
+}
+.connection-key-field input::placeholder {
+  color: #99a58e;
+}
+.connection-key-field .icon-button {
+  flex-shrink: 0;
+}
+.connection-form select,
+.connection-custom-model {
+  width: 100%;
+  min-height: 44px;
+  background: #fffef9;
+  color: #4e6241;
+  border: 1px solid #d9e0cf;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+.connection-custom-model {
+  margin-top: 10px;
+}
+.connection-hint {
+  font-size: 11px;
+  line-height: 1.8;
+  color: #7b8970;
+  margin: 8px 0 19px;
+}
+.connection-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.connection-actions .button {
+  justify-content: center;
+  min-height: 42px;
+}
+.connection-feedback {
+  font-size: 12px;
+  line-height: 1.9;
+  padding: 12px 14px;
+  margin-top: 14px;
+  border-radius: 6px;
+}
+.connection-feedback.success {
+  background: #edf3e7;
+  color: #56733e;
+}
+.connection-feedback.error {
+  background: #faf0e9;
+  color: #995d49;
+}
+.connection-privacy {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 10px;
+  line-height: 1.8;
+  color: #7f8e73;
+  margin: 18px 0;
+}
+.connection-privacy svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.connection-footer {
+  display: flex;
+  align-items: center;
+  min-height: 25px;
+  gap: 12px;
+}
+.connection-footer .text-button {
+  font-size: 11px;
+}
+.connection-done {
+  margin-left: auto;
+}
+.remove-connection {
+  color: #9e715c;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.connection-remove-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  font-size: 11px;
+  color: #9e715c;
+}
+@media (max-width: 600px) {
+  .connection-key-field input,
+  .connection-form select,
+  .connection-custom-model {
+    font-size: 16px;
+  }
+  .settings-dialog .settings-intro {
+    padding-top: 10px;
+  }
+  .settings-dialog .settings-intro h2 {
+    font-size: 21px;
+  }
+}
 .settings-info {
   padding: 23px 0;
 }

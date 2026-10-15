@@ -5,5 +5,6 @@ declare namespace Cloudflare {
     AI_API_KEY?: string;
     AI_BASE_URL?: string;
     AI_MODEL?: string;
+    AI_SETTINGS_ENCRYPTION_KEY?: string;
   }
 }

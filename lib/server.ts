@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { IdeaRepository } from "./ideas-repository";
+import { ConnectionError, ConnectionService } from "./ai-connections";
 
 export class HttpError extends Error {
   constructor(
@@ -20,7 +21,11 @@ export async function requestContext(request: Request) {
       throw new HttpError(403, "请求来源无效，请从当前网页重试。");
   }
   if (!env.DB) throw new HttpError(503, "数据库尚未配置，请完成数据库初始化。");
-  return { user, repository: new IdeaRepository(env.DB) };
+  return {
+    user,
+    repository: new IdeaRepository(env.DB),
+    connections: new ConnectionService(env.DB, env),
+  };
 }
 
 export async function readJSON(request: Request) {
@@ -62,7 +67,7 @@ export function json(data: unknown, status = 200) {
 }
 
 export function routeError(error: unknown) {
-  if (error instanceof HttpError)
+  if (error instanceof HttpError || error instanceof ConnectionError)
     return json({ error: error.message }, error.status);
   console.error(
     "Request failed:",

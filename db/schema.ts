@@ -1,5 +1,13 @@
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+export const aiConnections = sqliteTable("ai_connections", {
+  ownerId: text("owner_id").primaryKey(),
+  model: text("model").notNull(),
+  encryptedKey: text("encrypted_key").notNull(),
+  keyHint: text("key_hint").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
 export const ideas = sqliteTable(
   "ideas",
   {

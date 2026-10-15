@@ -10,6 +10,7 @@ export interface AIConfig {
   key: string;
   baseURL: string;
   model: string;
+  provider?: "deepseek";
 }
 
 export function getAIConfig(env: AIEnvironment): AIConfig | null {
@@ -53,8 +54,16 @@ export async function analyzeIdea(
         Authorization: `Bearer ${config.key}`,
       },
       signal: AbortSignal.timeout(60000),
+      redirect: "error",
       body: JSON.stringify({
         model: config.model,
+        ...(config.provider === "deepseek"
+          ? {
+              thinking: { type: "disabled" },
+              response_format: { type: "json_object" },
+              max_tokens: 4096,
+            }
+          : {}),
         messages: [
           { role: "system", content: ANALYSIS_PROMPT },
           { role: "user", content },
@@ -68,7 +77,11 @@ export async function analyzeIdea(
   }
   if (!response.ok) {
     if ([401, 403].includes(response.status))
-      throw new AnalysisError("AI 服务验证失败，请检查服务端密钥和模型权限。");
+      throw new AnalysisError(
+        "AI 服务验证失败，请在 AI 连接设置中检查密钥和模型权限。",
+      );
+    if (response.status === 402)
+      throw new AnalysisError("AI 服务余额不足，请充值后重试。灵感已保存。");
     if (response.status === 429)
       throw new AnalysisError("AI 服务请求受限或额度不足，请稍后重试。");
     throw new AnalysisError("AI 服务暂时无法完成分析，请检查模型配置后重试。");

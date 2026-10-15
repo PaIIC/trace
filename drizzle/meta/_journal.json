@@ -8,6 +8,13 @@
       "when": 1792040319394,
       "tag": "0000_gigantic_mole_man",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792044813815,
+      "tag": "0001_classy_thing",
+      "breakpoints": true
     }
   ]
 }

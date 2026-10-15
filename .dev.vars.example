@@ -1,5 +1,7 @@
-# 复制为 .dev.vars。文件已被 Git 忽略，密钥只在服务端使用。
-# 使用你选择的 OpenAI 兼容服务；BASE_URL 是 /chat/completions 之前的地址。
+# DeepSeek 可以直接在网页「AI 连接设置」中配置。
+# 本地启动自动创建 .dev.vars 与 AI_SETTINGS_ENCRYPTION_KEY；不要覆盖该文件或加密密钥。
+# 以下为可选的 OpenAI 兼容后备服务，按需追加到现有 .dev.vars。
+# 文件已被 Git 忽略，密钥只在服务端使用；BASE_URL 是 /chat/completions 之前的地址。
 AI_BASE_URL="https://your-provider.example/v1"
 AI_MODEL="your-model-name"
 AI_API_KEY=""

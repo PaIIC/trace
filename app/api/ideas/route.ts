@@ -1,6 +1,4 @@
 import { ideaInputSchema } from "@/lib/domain";
-import { env } from "cloudflare:workers";
-import { getAIConfig } from "@/lib/ai";
 import {
   HttpError,
   json,
@@ -20,7 +18,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const { user, repository } = await requestContext(request);
+    const { user, repository, connections } = await requestContext(request);
     const parsed = ideaInputSchema.safeParse(await readJSON(request));
     if (!parsed.success)
       throw new HttpError(400, parsed.error.issues[0].message);
@@ -35,7 +33,8 @@ export async function POST(request: Request) {
         409,
         "这份草稿的较早版本已保存。当前修改仍在输入框中，再次保存即可作为一条新灵感留下。",
       );
-    return json({ idea, aiConfigured: !!getAIConfig(env) }, 201);
+    const connection = await connections.summary(user.userId, user.displayName);
+    return json({ idea, aiConfigured: connection.configured }, 201);
   } catch (error) {
     return routeError(error);
   }
