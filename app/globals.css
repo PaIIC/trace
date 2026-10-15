@@ -1019,6 +1019,29 @@ kbd {
   width: 25px;
   height: 25px;
 }
+.idea-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.card-delete-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 5px 7px;
+  border-radius: 5px;
+  color: #8a8e7e;
+  font-size: 11px;
+}
+@media (pointer: coarse) {
+  .idea-card-actions .bookmark-button,
+  .card-delete-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
 .bookmarked {
   color: #79905c;
 }
@@ -1883,6 +1906,30 @@ kbd {
   line-height: 2;
   color: #89967c;
   margin: 20px 0;
+}
+.delete-target {
+  margin-top: 22px;
+  padding: 13px 15px;
+  background: #f1f4ec;
+  border: 1px solid #e2e7da;
+  border-radius: 6px;
+}
+.delete-target strong {
+  display: block;
+  font-size: 14px;
+  line-height: 1.8;
+  font-weight: 500;
+  color: #526547;
+  overflow-wrap: anywhere;
+}
+.delete-target time {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #849277;
+}
+.delete-dialog .form-error {
+  color: #ac6a55;
 }
 .delete-actions {
   display: flex;

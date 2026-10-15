@@ -66,7 +66,9 @@ export default function Notebook({
   const [ascending, setAscending] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Idea | null>(null);
+  const [deleteError, setDeleteError] = useState("");
+  const deleteOpen = deleteTarget !== null;
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [draft, setDraft] = useState<Draft>({ id: "", content: "", tags: "" });
@@ -79,6 +81,8 @@ export default function Notebook({
   const searchRef = useRef<HTMLInputElement>(null);
   const saveGuard = useRef(false);
   const analysisGuards = useRef(new Set<string>());
+  const deleteGuard = useRef(false);
+  const deletedIds = useRef(new Set<string>());
 
   const reload = useCallback(async () => {
     try {
@@ -86,7 +90,9 @@ export default function Notebook({
         api<{ ideas: Idea[] }>("/api/ideas"),
         api<Connection>("/api/config"),
       ]);
-      setIdeas(records.ideas);
+      setIdeas(
+        records.ideas.filter((idea) => !deletedIds.current.has(idea.id)),
+      );
       setConnection(config);
       setLoadError("");
     } catch (error) {
@@ -190,9 +196,11 @@ export default function Notebook({
 
   const upsert = (idea: Idea) =>
     setIdeas((previous) =>
-      [idea, ...previous.filter((item) => item.id !== idea.id)].sort((a, b) =>
-        b.createdAt.localeCompare(a.createdAt),
-      ),
+      deletedIds.current.has(idea.id)
+        ? previous
+        : [idea, ...previous.filter((item) => item.id !== idea.id)].sort(
+            (a, b) => b.createdAt.localeCompare(a.createdAt),
+          ),
     );
   const navigate = (id: string | null) => {
     setSelected(id);
@@ -271,12 +279,12 @@ export default function Notebook({
         `/api/ideas/${idea.id}/analyze`,
         { method: "POST" },
       );
-      if (result.idea) {
+      if (result.idea && !deletedIds.current.has(idea.id)) {
         upsert(result.idea);
         setToast("AI 分析已保存");
       }
     } catch (error) {
-      setToast((error as Error).message);
+      if (!deletedIds.current.has(idea.id)) setToast((error as Error).message);
       await reload();
     } finally {
       analysisGuards.current.delete(idea.id);
@@ -354,7 +362,8 @@ export default function Notebook({
         },
       );
       upsert(updated);
-      setToast(updated.bookmarked ? "已加入收藏" : "已取消收藏");
+      if (!deletedIds.current.has(idea.id))
+        setToast(updated.bookmarked ? "已加入收藏" : "已取消收藏");
     } catch (error) {
       setToast((error as Error).message);
     } finally {
@@ -362,18 +371,40 @@ export default function Notebook({
     }
   }
 
+  function askDelete(idea: Idea) {
+    setDeleteError("");
+    setDeleteTarget(idea);
+  }
+
+  function closeDelete() {
+    if (deleteGuard.current) return;
+    setDeleteTarget(null);
+    setDeleteError("");
+  }
+
   async function deleteIdea() {
-    if (!current || deleting) return;
+    if (!deleteTarget || deleteGuard.current) return;
+    const id = deleteTarget.id;
+    deleteGuard.current = true;
     setDeleting(true);
+    setDeleteError("");
     try {
-      await api(`/api/ideas/${current.id}`, { method: "DELETE" });
-      setIdeas((previous) => previous.filter((idea) => idea.id !== current.id));
-      setDeleteOpen(false);
-      navigate(null);
+      try {
+        await api(`/api/ideas/${id}`, { method: "DELETE" });
+      } catch (error) {
+        // A previous deletion may have succeeded even if its response was lost.
+        if (!(error instanceof ApiError && error.status === 404)) throw error;
+      }
+      // Ignore older polling, bookmark or analysis responses for this record.
+      deletedIds.current.add(id);
+      setIdeas((previous) => previous.filter((idea) => idea.id !== id));
+      setDeleteTarget(null);
+      if (window.location.pathname === `/ideas/${id}`) navigate(null);
       setToast("灵感已删除");
     } catch (error) {
-      setToast((error as Error).message);
+      setDeleteError((error as Error).message);
     } finally {
+      deleteGuard.current = false;
       setDeleting(false);
     }
   }
@@ -620,7 +651,8 @@ export default function Notebook({
                       <button
                         className="icon-button danger-hover"
                         aria-label="删除灵感"
-                        onClick={() => setDeleteOpen(true)}
+                        title="删除灵感"
+                        onClick={() => askDelete(current)}
                       >
                         <Trash2 size={16} />
                       </button>
@@ -988,23 +1020,35 @@ export default function Notebook({
                               <div className="idea-card">
                                 <div className="idea-card-top">
                                   <Status idea={idea} />
-                                  <button
-                                    className={`icon-button bookmark-button ${idea.bookmarked ? "bookmarked" : ""}`}
-                                    disabled={bookmarkBusy === idea.id}
-                                    aria-label={
-                                      idea.bookmarked ? "取消收藏" : "收藏灵感"
-                                    }
-                                    onClick={() => void toggleBookmark(idea)}
-                                  >
-                                    <Bookmark
-                                      size={16}
-                                      fill={
+                                  <div className="idea-card-actions">
+                                    <button
+                                      className={`icon-button bookmark-button ${idea.bookmarked ? "bookmarked" : ""}`}
+                                      disabled={bookmarkBusy === idea.id}
+                                      aria-label={
                                         idea.bookmarked
-                                          ? "currentColor"
-                                          : "none"
+                                          ? "取消收藏"
+                                          : "收藏灵感"
                                       }
-                                    />
-                                  </button>
+                                      onClick={() => void toggleBookmark(idea)}
+                                    >
+                                      <Bookmark
+                                        size={16}
+                                        fill={
+                                          idea.bookmarked
+                                            ? "currentColor"
+                                            : "none"
+                                        }
+                                      />
+                                    </button>
+                                    <button
+                                      className="card-delete-button danger-hover"
+                                      aria-label="删除灵感"
+                                      onClick={() => askDelete(idea)}
+                                    >
+                                      <Trash2 size={14} />
+                                      删除
+                                    </button>
+                                  </div>
                                 </div>
                                 <a
                                   href={`/ideas/${idea.id}`}
@@ -1240,21 +1284,34 @@ export default function Notebook({
 
       <Dialog
         open={deleteOpen}
-        onClose={() => {
-          if (!deleting) setDeleteOpen(false);
-        }}
+        onClose={closeDelete}
         title="删除这条灵感？"
         className="delete-dialog"
       >
+        {deleteTarget && (
+          <div className="delete-target">
+            <strong>
+              {deleteTarget.analysis?.title || deleteTarget.title}
+            </strong>
+            <time dateTime={deleteTarget.createdAt}>
+              {fullDate(deleteTarget.createdAt)}
+            </time>
+          </div>
+        )}
         <p>
           原始内容和对应的 AI
           分析将一并删除，且无法恢复。你也可以先导出全部笔记。
         </p>
+        {deleteError && (
+          <p className="form-error" role="alert">
+            {deleteError}
+          </p>
+        )}
         <div className="delete-actions">
           <button
             className="button secondary"
             disabled={deleting}
-            onClick={() => setDeleteOpen(false)}
+            onClick={closeDelete}
           >
             保留灵感
           </button>
