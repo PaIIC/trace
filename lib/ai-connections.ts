@@ -194,11 +194,15 @@ export async function testDeepSeekConnection(
         Accept: "application/json",
       },
       signal: AbortSignal.timeout(15000),
-      redirect: "error",
+      // Workers only supports "follow" and "manual". Never forward credentials
+      // to a redirect target; inspect and reject redirects ourselves below.
+      redirect: "manual",
     });
   } catch {
     throw new ConnectionError(502, "暂时无法连接 DeepSeek，请检查网络后重试。");
   }
+  if (response.status >= 300 && response.status < 400)
+    throw new ConnectionError(502, "DeepSeek 返回了非预期的跳转，请稍后重试。");
   if ([401, 403].includes(response.status))
     throw new ConnectionError(
       422,

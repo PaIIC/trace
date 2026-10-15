@@ -54,7 +54,9 @@ export async function analyzeIdea(
         Authorization: `Bearer ${config.key}`,
       },
       signal: AbortSignal.timeout(60000),
-      redirect: "error",
+      // "error" is unsupported in Workers. Reject redirects without following
+      // them, so the Authorization header never reaches a different endpoint.
+      redirect: "manual",
       body: JSON.stringify({
         model: config.model,
         ...(config.provider === "deepseek"
@@ -75,6 +77,10 @@ export async function analyzeIdea(
       "暂时无法连接 AI 服务或请求超时。灵感已保存，可以稍后重试。",
     );
   }
+  if (response.status >= 300 && response.status < 400)
+    throw new AnalysisError(
+      "AI 服务返回了非预期的跳转，请检查服务地址后重试。",
+    );
   if (!response.ok) {
     if ([401, 403].includes(response.status))
       throw new AnalysisError(

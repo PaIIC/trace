@@ -480,7 +480,7 @@ test("tests unsaved or retained credentials without persisting or sending any re
       `Bearer ${connectionInput().apiKey}`,
     );
     assert.equal(options.body, undefined);
-    assert.equal(options.redirect, "error");
+    assert.equal(options.redirect, "manual");
     assert.ok(options.signal);
     return Response.json({ data: [{ id: config.model }] });
   });
