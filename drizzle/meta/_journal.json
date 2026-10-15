@@ -1,5 +1,13 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1792040319394,
+      "tag": "0000_gigantic_mole_man",
+      "breakpoints": true
+    }
+  ]
 }
