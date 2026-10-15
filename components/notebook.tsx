@@ -52,6 +52,14 @@ type Connection = {
 type Draft = { id: string; content: string; tags: string };
 const DRAFT_KEY = "research-trace-draft";
 
+class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
   let response: Response;
   try {
@@ -66,13 +74,14 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
     throw new Error("服务暂时没有响应，请稍后重试。");
   }
   if (!response.ok)
-    throw new Error(
+    throw new ApiError(
       typeof data === "object" &&
         data &&
         "error" in data &&
         typeof data.error === "string"
         ? data.error
         : "操作失败，请稍后重试。",
+      response.status,
     );
   return data as T;
 }
@@ -360,6 +369,9 @@ export default function Notebook({
         void runAnalysis(idea);
     } catch (error) {
       setSaveError((error as Error).message);
+      // A lost save confirmation followed by an edited retry must not discard edits.
+      if (error instanceof ApiError && error.status === 409)
+        setDraft((previous) => ({ ...previous, id: crypto.randomUUID() }));
     } finally {
       saveGuard.current = false;
       setSaving(false);
