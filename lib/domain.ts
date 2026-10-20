@@ -13,6 +13,11 @@ export const ideaInputSchema = z.object({
   tags: z.array(z.string().trim().min(1).max(24)).max(8).default([]),
 });
 
+export const ideaEditSchema = ideaInputSchema
+  .pick({ content: true, tags: true })
+  .extend({ revision: z.number().int().min(1) })
+  .strict();
+
 export const analysisSchema = z.object({
   title: z.string().trim().min(1).max(100),
   summary: z.string().trim().min(1).max(2000),
@@ -25,6 +30,7 @@ export const analysisSchema = z.object({
 
 export type Analysis = z.infer<typeof analysisSchema>;
 export type IdeaInput = z.infer<typeof ideaInputSchema>;
+export type IdeaEdit = z.infer<typeof ideaEditSchema>;
 export type IdeaStatus = "pending" | "processing" | "completed" | "failed";
 export interface Idea {
   id: string;
@@ -33,13 +39,31 @@ export interface Idea {
   tags: string[];
   createdAt: string;
   updatedAt: string;
+  revision: number;
   bookmarked: boolean;
   status: IdeaStatus;
   analysis: Analysis | null;
+  analysisStale: boolean;
   analysisModel: string | null;
   analyzedAt: string | null;
   analysisStartedAt: string | null;
   error: string | null;
+}
+
+export function ideaTitle(idea: Idea): string {
+  return (!idea.analysisStale && idea.analysis?.title) || idea.title;
+}
+
+// A delayed poll or analysis response must not roll back a saved edit.
+export function newerIdea(current: Idea | undefined, incoming: Idea): Idea {
+  if (
+    current &&
+    (current.revision > incoming.revision ||
+      (current.revision === incoming.revision &&
+        current.updatedAt > incoming.updatedAt))
+  )
+    return current;
+  return incoming;
 }
 
 export function titleFromContent(content: string): string {

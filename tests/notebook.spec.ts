@@ -256,6 +256,8 @@ test("renders structured AI analysis and a retry failure while preserving previo
     tags: ["主动学习"],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    revision: 1,
+    analysisStale: false,
     bookmarked: false,
     status: "completed",
     analysis: {

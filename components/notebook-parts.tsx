@@ -18,7 +18,10 @@ export const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
 export const fullDate = (date: string) =>
   `${dateFormatter.format(new Date(date))} ${timeFormatter.format(new Date(date))}`;
 export const tagsOf = (idea: Idea) => [
-  ...new Set([...idea.tags, ...(idea.analysis?.keywords ?? [])]),
+  ...new Set([
+    ...idea.tags,
+    ...(!idea.analysisStale ? (idea.analysis?.keywords ?? []) : []),
+  ]),
 ];
 
 export function Dialog({
@@ -83,11 +86,15 @@ export function Status({ idea }: { idea: Idea }) {
   const running = isAnalysisRunning(idea);
   const label = running
     ? "分析中"
-    : idea.status === "completed"
-      ? "已分析"
-      : idea.status === "failed" || idea.status === "processing"
-        ? "待重试"
-        : "待分析";
+    : idea.analysisStale
+      ? idea.status === "failed"
+        ? "待更新 · 重试"
+        : "分析待更新"
+      : idea.status === "completed"
+        ? "已分析"
+        : idea.status === "failed" || idea.status === "processing"
+          ? "待重试"
+          : "待分析";
   return (
     <span className={`status status-${running ? "processing" : idea.status}`}>
       {running ? (

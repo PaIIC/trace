@@ -14,6 +14,9 @@ import { tmpdir } from "node:os";
 import { IdeaRepository } from "../lib/ideas-repository.ts";
 import {
   ideaInputSchema,
+  ideaEditSchema,
+  ideaTitle,
+  newerIdea,
   parseAnalysis,
   isAnalysisRunning,
   ANALYSIS_LEASE_MS,
@@ -125,7 +128,10 @@ test("isolates each owner's reads, bookmarks, deletion and analysis writes", asy
   assert.equal((await repo.list("owner-b")).length, 0);
   assert.equal(await repo.bookmark("owner-b", note.id, true), null);
   assert.equal(await repo.remove("owner-b", note.id), false);
-  assert.equal(await repo.claimAnalysis("owner-b", note.id, "job"), false);
+  assert.equal(
+    await repo.claimAnalysis("owner-b", note.id, "job", note.revision),
+    false,
+  );
   assert.equal(await repo.create("owner-b", { ...input(), id: note.id }), null);
   assert.equal((await repo.find("owner-a", note.id)).bookmarked, false);
 });
@@ -150,8 +156,14 @@ test("sorts by timestamp, persists bookmarks and deletes only the selected recor
 test("prevents duplicate AI requests and stores structured analysis with provenance", async () => {
   const { repository: repo } = repository();
   const note = await repo.create("owner", input());
-  assert.equal(await repo.claimAnalysis("owner", note.id, "job-1"), true);
-  assert.equal(await repo.claimAnalysis("owner", note.id, "job-2"), false);
+  assert.equal(
+    await repo.claimAnalysis("owner", note.id, "job-1", note.revision),
+    true,
+  );
+  assert.equal(
+    await repo.claimAnalysis("owner", note.id, "job-2", note.revision),
+    false,
+  );
   await repo.completeAnalysis(
     "owner",
     note.id,
@@ -171,11 +183,14 @@ test("prevents duplicate AI requests and stores structured analysis with provena
 test("recovers expired analysis leases and ignores stale results", async () => {
   const { repository: repo, sqlite } = repository();
   const note = await repo.create("owner", input());
-  await repo.claimAnalysis("owner", note.id, "old-job");
+  await repo.claimAnalysis("owner", note.id, "old-job", note.revision);
   sqlite
     .prepare("UPDATE ideas SET analysis_started_at = ? WHERE id = ?")
     .run(new Date(Date.now() - ANALYSIS_LEASE_MS - 1).toISOString(), note.id);
-  assert.equal(await repo.claimAnalysis("owner", note.id, "new-job"), true);
+  assert.equal(
+    await repo.claimAnalysis("owner", note.id, "new-job", note.revision),
+    true,
+  );
   await repo.completeAnalysis(
     "owner",
     note.id,
@@ -202,7 +217,7 @@ test("recovers expired analysis leases and ignores stale results", async () => {
 test("AI failure preserves the original note and previous successful analysis", async () => {
   const { repository: repo } = repository();
   const note = await repo.create("owner", input());
-  await repo.claimAnalysis("owner", note.id, "first-job");
+  await repo.claimAnalysis("owner", note.id, "first-job", note.revision);
   await repo.completeAnalysis(
     "owner",
     note.id,
@@ -210,13 +225,171 @@ test("AI failure preserves the original note and previous successful analysis", 
     analysis,
     "test-model",
   );
-  await repo.claimAnalysis("owner", note.id, "retry-job");
+  await repo.claimAnalysis("owner", note.id, "retry-job", note.revision);
   await repo.failAnalysis("owner", note.id, "retry-job", "服务暂时不可用");
   const saved = await repo.find("owner", note.id);
   assert.equal(saved.status, "failed");
   assert.equal(saved.content, note.content);
   assert.equal(saved.createdAt, note.createdAt);
   assert.deepEqual(saved.analysis, analysis);
+});
+
+test("edit validation rejects empty content, invalid revisions and protected fields", () => {
+  const edit = { content: "  修改后的想法  ", tags: ["关键词"], revision: 1 };
+  assert.equal(ideaEditSchema.parse(edit).content, "修改后的想法");
+  for (const bad of [
+    { content: "  " },
+    { content: "字".repeat(12001) },
+    { tags: ["字".repeat(25)] },
+    { tags: Array(9).fill("tag") },
+    { revision: 0 },
+    { revision: 1.5 },
+    { revision: undefined },
+    { createdAt: "2020-01-01T00:00:00Z" },
+    { analysis },
+    { bookmarked: true },
+    { ownerId: "another-owner" },
+  ])
+    assert.equal(ideaEditSchema.safeParse({ ...edit, ...bad }).success, false);
+});
+
+test("edits in place, preserves creation and bookmarks, and keeps retry saves idempotent", async () => {
+  const { repository: repo } = repository();
+  const note = await repo.create("owner", input());
+  await repo.bookmark("owner", note.id, true);
+  const edit = {
+    revision: note.revision,
+    content: "新的实验方向\n添加对照组",
+    tags: ["对照", "对照"],
+  };
+  const { idea: saved, conflict } = await repo.edit("owner", note.id, edit);
+  assert.equal(conflict, false);
+  assert.equal(saved.id, note.id);
+  assert.equal(saved.createdAt, note.createdAt);
+  assert.equal(saved.bookmarked, true);
+  assert.equal(saved.title, "新的实验方向");
+  assert.equal(saved.content, edit.content);
+  assert.deepEqual(saved.tags, ["对照"]);
+  assert.equal(saved.revision, note.revision + 1);
+  assert.equal(saved.analysisStale, false);
+  assert.equal((await repo.list("owner")).length, 1);
+  const retried = await repo.edit("owner", note.id, edit);
+  assert.equal(retried.conflict, false);
+  assert.deepEqual(retried.idea, saved);
+  assert.equal((await repo.edit("other-owner", note.id, edit)).idea, null);
+  const conflicting = await repo.edit("owner", note.id, {
+    ...edit,
+    content: "旧页面中的草稿",
+  });
+  assert.equal(conflicting.conflict, true);
+  assert.deepEqual(conflicting.idea, saved);
+  await repo.remove("owner", note.id);
+  assert.equal((await repo.edit("owner", note.id, edit)).idea, null);
+});
+
+test("edits mark prior analysis stale; failed regeneration preserves it until a fresh result succeeds", async () => {
+  const { repository: repo } = repository();
+  const note = await repo.create("owner", input());
+  await repo.claimAnalysis("owner", note.id, "initial", note.revision);
+  await repo.completeAnalysis(
+    "owner",
+    note.id,
+    "initial",
+    analysis,
+    "initial-model",
+  );
+  const { idea: edited } = await repo.edit("owner", note.id, {
+    revision: note.revision,
+    content: "修改后的研究方向",
+    tags: [],
+  });
+  assert.equal(edited.status, "pending");
+  assert.equal(edited.analysisStale, true);
+  assert.deepEqual(edited.analysis, analysis);
+  assert.equal(ideaTitle(edited), edited.title);
+  await repo.claimAnalysis("owner", note.id, "retry", edited.revision);
+  await repo.failAnalysis("owner", note.id, "retry", "模拟分析失败");
+  const failed = await repo.find("owner", note.id);
+  assert.equal(failed.content, edited.content);
+  assert.equal(failed.analysisStale, true);
+  assert.equal(failed.status, "failed");
+  assert.deepEqual(failed.analysis, analysis);
+  await repo.claimAnalysis("owner", note.id, "fresh", edited.revision);
+  const fresh = { ...analysis, title: "新方向的分析" };
+  await repo.completeAnalysis("owner", note.id, "fresh", fresh, "new-model");
+  const completed = await repo.find("owner", note.id);
+  assert.equal(completed.analysisStale, false);
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.analysisStartedAt, null);
+  assert.equal(ideaTitle(completed), fresh.title);
+  assert.equal(completed.content, edited.content);
+});
+
+test("edits cancel earlier jobs and reject analysis claims against an old snapshot", async () => {
+  const { repository: repo } = repository();
+  const note = await repo.create("owner", input());
+  await repo.claimAnalysis("owner", note.id, "old", note.revision);
+  const { idea: edited } = await repo.edit("owner", note.id, {
+    revision: note.revision,
+    content: "分析中修改后的内容",
+    tags: [],
+  });
+  assert.equal(edited.analysisStartedAt, null);
+  assert.equal(
+    await repo.claimAnalysis("owner", note.id, "outdated-claim", note.revision),
+    false,
+  );
+  assert.equal(
+    await repo.claimAnalysis("owner", note.id, "new", edited.revision),
+    true,
+  );
+  assert.equal(
+    await repo.completeAnalysis("owner", note.id, "old", analysis, "old-model"),
+    false,
+  );
+  assert.equal(
+    await repo.failAnalysis("owner", note.id, "old", "过期错误"),
+    false,
+  );
+  const running = await repo.find("owner", note.id);
+  assert.equal(running.status, "processing");
+  assert.equal(running.analysis, null);
+  assert.equal(running.error, null);
+  assert.equal(
+    await repo.completeAnalysis("owner", note.id, "new", analysis, "new-model"),
+    true,
+  );
+  assert.equal((await repo.find("owner", note.id)).analysisModel, "new-model");
+});
+
+test("unchanged saves leave a completed or running analysis intact", async () => {
+  const { repository: repo } = repository();
+  const note = await repo.create("owner", input());
+  await repo.claimAnalysis("owner", note.id, "job", note.revision);
+  const edit = {
+    revision: note.revision,
+    content: note.content,
+    tags: note.tags,
+  };
+  const same = await repo.edit("owner", note.id, edit);
+  assert.equal(same.idea.revision, note.revision);
+  assert.equal(same.idea.status, "processing");
+  await repo.completeAnalysis("owner", note.id, "job", analysis, "model");
+  assert.equal(
+    (await repo.edit("owner", note.id, edit)).idea.status,
+    "completed",
+  );
+});
+
+test("late responses cannot replace a newer revision or a newer same-revision result", async () => {
+  const { repository: repo } = repository();
+  const note = await repo.create("owner", input());
+  const edited = { ...note, content: "新想法", revision: note.revision + 1 };
+  assert.equal(newerIdea(edited, { ...note, updatedAt: "2099-01-01" }), edited);
+  assert.equal(newerIdea(note, edited), edited);
+  const fresh = { ...edited, updatedAt: "2099-01-01" };
+  assert.equal(newerIdea(fresh, edited), fresh);
+  assert.equal(newerIdea(undefined, note), note);
 });
 
 test("AI configuration requires all values and rejects unsafe or malformed endpoints", () => {

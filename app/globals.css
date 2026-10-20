@@ -1024,7 +1024,8 @@ kbd {
   align-items: center;
   gap: 8px;
 }
-.card-delete-button {
+.card-delete-button,
+.card-edit-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1035,9 +1036,14 @@ kbd {
   color: #8a8e7e;
   font-size: 11px;
 }
+.card-edit-button:hover {
+  color: #597443;
+  background: #edf2e6;
+}
 @media (pointer: coarse) {
   .idea-card-actions .bookmark-button,
-  .card-delete-button {
+  .card-delete-button,
+  .card-edit-button {
     min-width: 44px;
     min-height: 44px;
   }
@@ -1226,11 +1232,11 @@ kbd {
   gap: 6px;
   align-items: center;
 }
-.detail-meta > .icon-button {
+.detail-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
   margin-left: auto;
-}
-.detail-meta > .icon-button + .icon-button {
-  margin-left: -15px;
 }
 .danger-hover:hover {
   color: #ad6654;
@@ -1590,6 +1596,80 @@ kbd {
   color: #ac6a55;
   line-height: 1.8;
   margin-top: 12px;
+}
+.edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+.edit-actions .button {
+  flex: 1 1 auto;
+  min-height: 44px;
+}
+.edit-timestamp {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  color: #89977b;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.edit-timestamp svg {
+  flex-shrink: 0;
+}
+.edit-hint {
+  margin-top: 12px;
+  font-size: 11px;
+  line-height: 1.8;
+  color: #89977b;
+}
+.edit-discard,
+.edit-conflict {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 6px;
+  background: #f5f1e8;
+  color: #8b754d;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.edit-discard > div {
+  display: flex;
+  gap: 18px;
+  margin-top: 6px;
+}
+.edit-conflict p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 150px;
+  overflow-y: auto;
+  margin: 8px 0;
+}
+.analysis-stale {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 20px;
+  padding: 13px;
+  border: 1px solid #e9dfc9;
+  border-radius: 7px;
+  background: #fbf6eb;
+  color: #9a8051;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.analysis-stale svg,
+.analysis-stale button {
+  flex-shrink: 0;
+}
+.analysis-stale svg {
+  margin-top: 3px;
+}
+.analysis-stale button {
+  color: #836c42;
 }
 .settings-dialog {
   width: min(520px, calc(100vw - 32px));

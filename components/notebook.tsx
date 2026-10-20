@@ -20,6 +20,7 @@ import {
   Lightbulb,
   LoaderCircle,
   Orbit,
+  Pencil,
   Plus,
   Search,
   Settings2,
@@ -32,7 +33,13 @@ import type { Idea } from "@/lib/domain";
 import type { Connection } from "@/lib/connection-types";
 import { api, ApiError } from "@/lib/api-client";
 import { AISettings } from "./ai-settings";
-import { isAnalysisRunning, MAX_CONTENT_LENGTH } from "@/lib/domain";
+import { IdeaEditor } from "./idea-editor";
+import {
+  ideaTitle,
+  isAnalysisRunning,
+  MAX_CONTENT_LENGTH,
+  newerIdea,
+} from "@/lib/domain";
 import {
   Activity,
   AnalysisSection,
@@ -48,6 +55,7 @@ import {
 
 type Draft = { id: string; content: string; tags: string };
 const DRAFT_KEY = "research-trace-draft";
+const analysisKey = (idea: Idea) => `${idea.id}:${idea.revision}`;
 
 export default function Notebook({
   initialIdeaId = null,
@@ -66,6 +74,8 @@ export default function Notebook({
   const [ascending, setAscending] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<Idea | null>(null);
+  const editOpen = editTarget !== null;
   const [deleteTarget, setDeleteTarget] = useState<Idea | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const deleteOpen = deleteTarget !== null;
@@ -83,6 +93,7 @@ export default function Notebook({
   const analysisGuards = useRef(new Set<string>());
   const deleteGuard = useRef(false);
   const deletedIds = useRef(new Set<string>());
+  const latestRevisions = useRef(new Map<string, number>());
 
   const reload = useCallback(async () => {
     try {
@@ -90,9 +101,18 @@ export default function Notebook({
         api<{ ideas: Idea[] }>("/api/ideas"),
         api<Connection>("/api/config"),
       ]);
-      setIdeas(
-        records.ideas.filter((idea) => !deletedIds.current.has(idea.id)),
+      records.ideas.forEach((idea) =>
+        latestRevisions.current.set(
+          idea.id,
+          Math.max(latestRevisions.current.get(idea.id) ?? 0, idea.revision),
+        ),
       );
+      setIdeas((previous) => {
+        const byId = new Map(previous.map((idea) => [idea.id, idea]));
+        return records.ideas
+          .filter((idea) => !deletedIds.current.has(idea.id))
+          .map((idea) => newerIdea(byId.get(idea.id), idea));
+      });
       setConnection(config);
       setLoadError("");
     } catch (error) {
@@ -167,7 +187,7 @@ export default function Notebook({
         (event.target as HTMLElement).isContentEditable;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        if (!composerOpen && !settingsOpen && !deleteOpen)
+        if (!composerOpen && !settingsOpen && !deleteOpen && !editOpen)
           searchRef.current?.focus();
       }
       if (
@@ -176,7 +196,8 @@ export default function Notebook({
         !event.ctrlKey &&
         !event.metaKey &&
         !settingsOpen &&
-        !deleteOpen
+        !deleteOpen &&
+        !editOpen
       ) {
         event.preventDefault();
         setComposerOpen(true);
@@ -184,7 +205,7 @@ export default function Notebook({
     };
     window.addEventListener("keydown", shortcuts);
     return () => window.removeEventListener("keydown", shortcuts);
-  }, [composerOpen, settingsOpen, deleteOpen]);
+  }, [composerOpen, settingsOpen, deleteOpen, editOpen]);
   const hasProcessing = ideas.some((idea) => isAnalysisRunning(idea));
   useEffect(() => {
     if (!hasProcessing) return;
@@ -194,14 +215,22 @@ export default function Notebook({
     return () => clearInterval(timer);
   }, [hasProcessing, reload]);
 
-  const upsert = (idea: Idea) =>
-    setIdeas((previous) =>
-      deletedIds.current.has(idea.id)
-        ? previous
-        : [idea, ...previous.filter((item) => item.id !== idea.id)].sort(
-            (a, b) => b.createdAt.localeCompare(a.createdAt),
-          ),
+  const upsert = (idea: Idea) => {
+    if (deletedIds.current.has(idea.id)) return;
+    latestRevisions.current.set(
+      idea.id,
+      Math.max(latestRevisions.current.get(idea.id) ?? 0, idea.revision),
     );
+    setIdeas((previous) =>
+      [
+        newerIdea(
+          previous.find((item) => item.id === idea.id),
+          idea,
+        ),
+        ...previous.filter((item) => item.id !== idea.id),
+      ].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    );
+  };
   const navigate = (id: string | null) => {
     setSelected(id);
     window.history.pushState(null, "", id ? `/ideas/${id}` : "/");
@@ -238,7 +267,7 @@ export default function Notebook({
                 : idea.status !== "completed")) &&
             (!tag || tagsOf(idea).includes(tag)) &&
             (!query.trim() ||
-              `${idea.title} ${idea.content} ${idea.analysis?.summary ?? ""} ${tagsOf(idea).join(" ")}`
+              `${ideaTitle(idea)} ${idea.content} ${!idea.analysisStale ? (idea.analysis?.summary ?? "") : ""} ${tagsOf(idea).join(" ")}`
                 .toLocaleLowerCase()
                 .includes(query.trim().toLocaleLowerCase())),
         )
@@ -259,12 +288,17 @@ export default function Notebook({
   }, [visible]);
 
   async function runAnalysis(idea: Idea) {
-    if (analysisGuards.current.has(idea.id)) return;
-    analysisGuards.current.add(idea.id);
-    setAnalyzing((previous) => new Set(previous).add(idea.id));
+    const key = analysisKey(idea);
+    if (analysisGuards.current.has(key)) return;
+    const isCurrent = () =>
+      !deletedIds.current.has(idea.id) &&
+      (latestRevisions.current.get(idea.id) ?? idea.revision) <= idea.revision;
+    analysisGuards.current.add(key);
+    setAnalyzing((previous) => new Set(previous).add(key));
     try {
       const config = await api<Connection>("/api/config");
       setConnection(config);
+      if (!isCurrent()) return;
       if (!config.configured) {
         setSettingsOpen(true);
         return;
@@ -277,20 +311,24 @@ export default function Notebook({
       });
       const result = await api<{ idea: Idea }>(
         `/api/ideas/${idea.id}/analyze`,
-        { method: "POST" },
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ revision: idea.revision }),
+        },
       );
       if (result.idea && !deletedIds.current.has(idea.id)) {
         upsert(result.idea);
-        setToast("AI 分析已保存");
+        if (isCurrent()) setToast("AI 分析已保存");
       }
     } catch (error) {
-      if (!deletedIds.current.has(idea.id)) setToast((error as Error).message);
+      if (isCurrent()) setToast((error as Error).message);
       await reload();
     } finally {
-      analysisGuards.current.delete(idea.id);
+      analysisGuards.current.delete(key);
       setAnalyzing((previous) => {
         const next = new Set(previous);
-        next.delete(idea.id);
+        next.delete(key);
         return next;
       });
     }
@@ -626,7 +664,7 @@ export default function Notebook({
                 <>
                   <div className="detail-title">
                     <div className="eyebrow">A THOUGHT WORTH EXPLORING</div>
-                    <h1>{current.analysis?.title || current.title}</h1>
+                    <h1>{ideaTitle(current)}</h1>
                     <div className="detail-meta">
                       <span>
                         <Clock3 size={14} />
@@ -635,34 +673,44 @@ export default function Notebook({
                         </time>
                       </span>
                       <Status idea={current} />
-                      <button
-                        className={`icon-button ${current.bookmarked ? "bookmarked" : ""}`}
-                        disabled={bookmarkBusy === current.id}
-                        onClick={() => void toggleBookmark(current)}
-                        aria-label={
-                          current.bookmarked ? "取消收藏" : "收藏灵感"
-                        }
-                      >
-                        <Bookmark
-                          size={17}
-                          fill={current.bookmarked ? "currentColor" : "none"}
-                        />
-                      </button>
-                      <button
-                        className="icon-button danger-hover"
-                        aria-label="删除灵感"
-                        title="删除灵感"
-                        onClick={() => askDelete(current)}
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      <div className="detail-actions">
+                        <button
+                          className="card-edit-button"
+                          aria-label="编辑灵感"
+                          onClick={() => setEditTarget(current)}
+                        >
+                          <Pencil size={15} />
+                          编辑
+                        </button>
+                        <button
+                          className={`icon-button ${current.bookmarked ? "bookmarked" : ""}`}
+                          disabled={bookmarkBusy === current.id}
+                          onClick={() => void toggleBookmark(current)}
+                          aria-label={
+                            current.bookmarked ? "取消收藏" : "收藏灵感"
+                          }
+                        >
+                          <Bookmark
+                            size={17}
+                            fill={current.bookmarked ? "currentColor" : "none"}
+                          />
+                        </button>
+                        <button
+                          className="icon-button danger-hover"
+                          aria-label="删除灵感"
+                          title="删除灵感"
+                          onClick={() => askDelete(current)}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </div>
                   </div>
                   <div className="detail-grid">
                     <section className="original-card">
                       <div className="section-label">
                         <Feather size={16} />
-                        <h2>最初的想法</h2>
+                        <h2>灵感内容</h2>
                         <button
                           className="icon-button"
                           aria-label="复制灵感原文"
@@ -690,7 +738,9 @@ export default function Notebook({
                       )}
                       <div className="original-foot">
                         <CheckCheck size={14} />
-                        原始记录 · 自动保存时间戳
+                        {current.revision > 1
+                          ? "已编辑 · 保留原始记录时间"
+                          : "原始记录 · 自动保存时间戳"}
                       </div>
                     </section>
                     <section className="analysis-panel">
@@ -704,7 +754,7 @@ export default function Notebook({
                         <span className="eyebrow">AI INSIGHTS</span>
                       </div>
                       {isAnalysisRunning(current) ||
-                      analyzing.has(current.id) ? (
+                      analyzing.has(analysisKey(current)) ? (
                         <div className="analysis-waiting">
                           <span className="orb processing">
                             <Sparkles size={28} />
@@ -722,6 +772,20 @@ export default function Notebook({
                         </div>
                       ) : current.analysis ? (
                         <>
+                          {current.analysisStale && (
+                            <div className="analysis-stale" role="status">
+                              <Sparkles size={16} />
+                              <p>
+                                想法已修改，以下为修改前的分析。重新分析后将更新为最新结果。
+                              </p>
+                              <button
+                                className="text-button"
+                                onClick={() => void runAnalysis(current)}
+                              >
+                                重新分析
+                              </button>
+                            </div>
+                          )}
                           <div className="analysis-summary">
                             <span>灵感概述</span>
                             <p>{current.analysis.summary}</p>
@@ -760,13 +824,15 @@ export default function Notebook({
                               {current.analyzedAt &&
                                 fullDate(current.analyzedAt)}
                             </span>
-                            <button
-                              className="text-button"
-                              onClick={() => void runAnalysis(current)}
-                            >
-                              <Sparkles size={13} />
-                              重新分析
-                            </button>
+                            {!current.analysisStale && (
+                              <button
+                                className="text-button"
+                                onClick={() => void runAnalysis(current)}
+                              >
+                                <Sparkles size={13} />
+                                重新分析
+                              </button>
+                            )}
                           </div>
                           {current.error && (
                             <p className="form-error">
@@ -1022,6 +1088,14 @@ export default function Notebook({
                                   <Status idea={idea} />
                                   <div className="idea-card-actions">
                                     <button
+                                      className="card-edit-button"
+                                      aria-label="编辑灵感"
+                                      onClick={() => setEditTarget(idea)}
+                                    >
+                                      <Pencil size={14} />
+                                      编辑
+                                    </button>
+                                    <button
                                       className={`icon-button bookmark-button ${idea.bookmarked ? "bookmarked" : ""}`}
                                       disabled={bookmarkBusy === idea.id}
                                       aria-label={
@@ -1059,7 +1133,7 @@ export default function Notebook({
                                   }}
                                 >
                                   <h3>
-                                    {idea.analysis?.title || idea.title}
+                                    {ideaTitle(idea)}
                                     <ArrowUpRight size={17} />
                                   </h3>
                                   <p>{idea.content}</p>
@@ -1087,7 +1161,7 @@ export default function Notebook({
                                     <ArrowRight size={14} />
                                   </button>
                                 </div>
-                                {idea.analysis && (
+                                {idea.analysis && !idea.analysisStale && (
                                   <div className="idea-insight">
                                     <Sparkles size={13} />
                                     <p>{idea.analysis.summary}</p>
@@ -1282,6 +1356,24 @@ export default function Notebook({
         />
       )}
 
+      {editTarget && (
+        <IdeaEditor
+          key={editTarget.id}
+          idea={editTarget}
+          aiConfigured={!!connection?.configured}
+          onClose={() => setEditTarget(null)}
+          onSaved={(idea, regenerate) => {
+            upsert(idea);
+            setEditTarget(null);
+            setToast("修改已保存");
+            if (regenerate) {
+              navigate(idea.id);
+              void runAnalysis(idea);
+            }
+          }}
+        />
+      )}
+
       <Dialog
         open={deleteOpen}
         onClose={closeDelete}
@@ -1290,9 +1382,7 @@ export default function Notebook({
       >
         {deleteTarget && (
           <div className="delete-target">
-            <strong>
-              {deleteTarget.analysis?.title || deleteTarget.title}
-            </strong>
+            <strong>{ideaTitle(deleteTarget)}</strong>
             <time dateTime={deleteTarget.createdAt}>
               {fullDate(deleteTarget.createdAt)}
             </time>
