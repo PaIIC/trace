@@ -15,6 +15,7 @@ import { IdeaRepository } from "../lib/ideas-repository.ts";
 import {
   ideaInputSchema,
   ideaEditSchema,
+  ideaRestoreSchema,
   ideaTitle,
   newerIdea,
   parseAnalysis,
@@ -54,6 +55,18 @@ function repository() {
       readFileSync(new URL(`../drizzle/${file}`, import.meta.url), "utf8"),
     );
   const db = {
+    async batch(statements) {
+      sqlite.exec("BEGIN");
+      try {
+        const results = [];
+        for (const statement of statements) results.push(await statement.all());
+        sqlite.exec("COMMIT");
+        return results;
+      } catch (error) {
+        sqlite.exec("ROLLBACK");
+        throw error;
+      }
+    },
     prepare(sql) {
       const statement = sqlite.prepare(sql);
       let values = [];
@@ -390,6 +403,364 @@ test("late responses cannot replace a newer revision or a newer same-revision re
   const fresh = { ...edited, updatedAt: "2099-01-01" };
   assert.equal(newerIdea(fresh, edited), fresh);
   assert.equal(newerIdea(undefined, note), note);
+});
+
+test("archives exact pre-edit content and AI provenance once, without recording no-op saves or conflicts", async () => {
+  const { repository: repo } = repository();
+  const note = await repo.create("owner", input("第一版想法"));
+  assert.deepEqual((await repo.history("owner", note.id)).versions, []);
+  await repo.claimAnalysis("owner", note.id, "job", note.revision);
+  await repo.completeAnalysis(
+    "owner",
+    note.id,
+    "job",
+    analysis,
+    "version-one-model",
+  );
+  const before = await repo.find("owner", note.id);
+  const edit = {
+    content: "第二版想法",
+    tags: ["新关键词"],
+    revision: note.revision,
+  };
+  const { idea: second } = await repo.edit("owner", note.id, edit);
+  const firstHistory = await repo.history("owner", note.id);
+  assert.deepEqual(firstHistory.idea, second);
+  assert.deepEqual(firstHistory.versions[0].idea, before);
+  assert.ok(
+    Date.parse(firstHistory.versions[0].archivedAt) >=
+      Date.parse(before.updatedAt),
+  );
+  await repo.edit("owner", note.id, edit);
+  await repo.edit("owner", note.id, { ...edit, content: "冲突的草稿" });
+  await repo.bookmark("owner", note.id, true);
+  assert.equal((await repo.history("owner", note.id)).versions.length, 1);
+  await repo.claimAnalysis("owner", note.id, "second-job", second.revision);
+  await repo.completeAnalysis(
+    "owner",
+    note.id,
+    "second-job",
+    { ...analysis, title: "第二版的分析" },
+    "version-two-model",
+  );
+  await repo.edit("owner", note.id, {
+    ...edit,
+    content: "第三版",
+    revision: second.revision,
+  });
+  const history = await repo.history("owner", note.id);
+  assert.deepEqual(
+    history.versions.map((v) => v.idea.revision),
+    [2, 1],
+  );
+  assert.equal(history.versions[0].idea.analysis.title, "第二版的分析");
+  assert.deepEqual(history.versions[1], firstHistory.versions[0]);
+});
+
+test("restores content, tags and matching analysis as a new version and preserves both directions of history", async () => {
+  const { repository: repo } = repository();
+  const original = await repo.create("owner", input("原始想法"));
+  await repo.claimAnalysis("owner", original.id, "original-analysis", 1);
+  await repo.completeAnalysis(
+    "owner",
+    original.id,
+    "original-analysis",
+    analysis,
+    "original-model",
+  );
+  const originalWithAnalysis = await repo.find("owner", original.id);
+  const { idea: edited } = await repo.edit("owner", original.id, {
+    content: "修改后的想法",
+    tags: ["修改"],
+    revision: 1,
+  });
+  await repo.bookmark("owner", original.id, true);
+  const result = await repo.restore("owner", original.id, {
+    versionRevision: 1,
+    revision: edited.revision,
+    requestId: crypto.randomUUID(),
+  });
+  assert.equal(result.conflict, false);
+  assert.equal(result.idea.revision, 3);
+  assert.equal(result.idea.restoredFromRevision, 1);
+  assert.equal(result.idea.id, original.id);
+  assert.equal(result.idea.content, original.content);
+  assert.deepEqual(result.idea.tags, original.tags);
+  assert.equal(result.idea.createdAt, original.createdAt);
+  assert.equal(result.idea.bookmarked, true);
+  assert.deepEqual(result.idea.analysis, analysis);
+  assert.equal(result.idea.analysisModel, originalWithAnalysis.analysisModel);
+  assert.equal(result.idea.analyzedAt, originalWithAnalysis.analyzedAt);
+  assert.equal(result.idea.analysisStale, false);
+  assert.equal(result.idea.status, "completed");
+  assert.deepEqual(
+    (await repo.history("owner", original.id)).versions.map(
+      (v) => v.idea.revision,
+    ),
+    [2, 1],
+  );
+  const forward = await repo.restore("owner", original.id, {
+    versionRevision: 2,
+    revision: 3,
+    requestId: crypto.randomUUID(),
+  });
+  assert.equal(forward.idea.content, edited.content);
+  assert.deepEqual(forward.idea.tags, edited.tags);
+  assert.equal(forward.idea.analysisStale, true);
+  assert.equal(forward.idea.revision, 4);
+  assert.equal((await repo.history("owner", original.id)).versions.length, 3);
+  const { idea: newEdit } = await repo.edit("owner", original.id, {
+    revision: 4,
+    content: "恢复后继续编辑",
+    tags: [],
+  });
+  assert.equal(newEdit.restoredFromRevision, null);
+  assert.equal(
+    (await repo.history("owner", original.id)).versions[0].idea
+      .restoredFromRevision,
+    2,
+  );
+});
+
+test("restore retries are idempotent and outdated restore requests cannot overwrite a later edit", async () => {
+  const { repository: repo } = repository();
+  const original = await repo.create("owner", input());
+  await repo.edit("owner", original.id, {
+    revision: 1,
+    content: "第二版",
+    tags: [],
+  });
+  const request = {
+    versionRevision: 1,
+    revision: 2,
+    requestId: crypto.randomUUID(),
+  };
+  const once = await repo.restore("owner", original.id, request);
+  const twice = await repo.restore("owner", original.id, request);
+  assert.equal(twice.conflict, false);
+  assert.deepEqual(twice.idea, once.idea);
+  assert.equal((await repo.history("owner", original.id)).versions.length, 2);
+  const { idea: edited } = await repo.edit("owner", original.id, {
+    revision: 3,
+    content: "另一页面的新内容",
+    tags: [],
+  });
+  const stale = await repo.restore("owner", original.id, request);
+  assert.equal(stale.conflict, true);
+  assert.deepEqual(stale.idea, edited);
+  assert.equal((await repo.history("owner", original.id)).versions.length, 3);
+});
+
+test("restoring cancels active AI jobs and never resumes a historical processing job", async () => {
+  const { repository: repo } = repository();
+  const original = await repo.create("owner", input());
+  await repo.claimAnalysis("owner", original.id, "old-job", 1);
+  await repo.edit("owner", original.id, {
+    revision: 1,
+    content: "第二版",
+    tags: [],
+  });
+  await repo.claimAnalysis("owner", original.id, "current-job", 2);
+  const restored = await repo.restore("owner", original.id, {
+    versionRevision: 1,
+    revision: 2,
+    requestId: crypto.randomUUID(),
+  });
+  assert.equal(restored.idea.status, "pending");
+  assert.equal(restored.idea.analysisStartedAt, null);
+  assert.equal(restored.idea.analysis, null);
+  assert.equal(
+    await repo.completeAnalysis(
+      "owner",
+      original.id,
+      "old-job",
+      analysis,
+      "outdated",
+    ),
+    false,
+  );
+  assert.equal(
+    await repo.completeAnalysis(
+      "owner",
+      original.id,
+      "current-job",
+      analysis,
+      "outdated",
+    ),
+    false,
+  );
+  assert.equal(
+    await repo.failAnalysis("owner", original.id, "current-job", "outdated"),
+    false,
+  );
+  const historical = (await repo.history("owner", original.id)).versions;
+  assert.ok(
+    historical.every(
+      (v) => v.idea.status === "processing" && v.idea.analysis === null,
+    ),
+  );
+  assert.equal(
+    await repo.claimAnalysis("owner", original.id, "fresh-job", 3),
+    true,
+  );
+});
+
+test("failed restoration remains an exact snapshot, including stale analysis and its error", async () => {
+  const { repository: repo } = repository();
+  const note = await repo.create("owner", input());
+  await repo.claimAnalysis("owner", note.id, "first", 1);
+  await repo.completeAnalysis("owner", note.id, "first", analysis, "model");
+  await repo.edit("owner", note.id, {
+    revision: 1,
+    content: "第二版",
+    tags: [],
+  });
+  await repo.claimAnalysis("owner", note.id, "failed", 2);
+  await repo.failAnalysis("owner", note.id, "failed", "暂时无法分析");
+  const failed = await repo.find("owner", note.id);
+  await repo.edit("owner", note.id, {
+    revision: 2,
+    content: "第三版",
+    tags: [],
+  });
+  const result = await repo.restore("owner", note.id, {
+    revision: 3,
+    versionRevision: 2,
+    requestId: crypto.randomUUID(),
+  });
+  assert.equal(result.idea.content, failed.content);
+  assert.equal(result.idea.status, "failed");
+  assert.equal(result.idea.error, failed.error);
+  assert.equal(result.idea.analysisStale, true);
+  assert.deepEqual(result.idea.analysis, failed.analysis);
+});
+
+test("history and live changes roll back together if saving either part fails", async () => {
+  const { repository: repo, sqlite } = repository();
+  const note = await repo.create("owner", input());
+  sqlite.exec(
+    "CREATE TRIGGER reject_edit BEFORE UPDATE OF content ON ideas BEGIN SELECT RAISE(ABORT, 'simulated write failure'); END;",
+  );
+  await assert.rejects(
+    () =>
+      repo.edit("owner", note.id, {
+        revision: 1,
+        content: "未能保存",
+        tags: [],
+      }),
+    /simulated write failure/,
+  );
+  assert.deepEqual(await repo.find("owner", note.id), note);
+  assert.equal((await repo.history("owner", note.id)).versions.length, 0);
+  sqlite.exec("DROP TRIGGER reject_edit;");
+  const { idea: edited } = await repo.edit("owner", note.id, {
+    revision: 1,
+    content: "第二版",
+    tags: [],
+  });
+  sqlite.exec(
+    "CREATE TRIGGER reject_restore BEFORE UPDATE OF content ON ideas BEGIN SELECT RAISE(ABORT, 'simulated restore failure'); END;",
+  );
+  await assert.rejects(
+    () =>
+      repo.restore("owner", note.id, {
+        revision: 2,
+        versionRevision: 1,
+        requestId: crypto.randomUUID(),
+      }),
+    /simulated restore failure/,
+  );
+  assert.deepEqual(await repo.find("owner", note.id), edited);
+  assert.equal((await repo.history("owner", note.id)).versions.length, 1);
+  sqlite.exec(
+    "DROP TRIGGER reject_restore; CREATE TRIGGER reject_snapshot BEFORE INSERT ON idea_versions BEGIN SELECT RAISE(ABORT, 'simulated archive failure'); END;",
+  );
+  await assert.rejects(
+    () =>
+      repo.edit("owner", note.id, { revision: 2, content: "第三版", tags: [] }),
+    /simulated archive failure/,
+  );
+  assert.deepEqual(await repo.find("owner", note.id), edited);
+});
+
+test("history is owner-scoped, exports include snapshots without private jobs, and deletion removes snapshots", async () => {
+  const { repository: repo, sqlite } = repository();
+  const mine = await repo.create("owner", input("我的第一版"));
+  const other = await repo.create("another", input("别人的第一版"));
+  await repo.edit("owner", mine.id, {
+    revision: 1,
+    content: "我的第二版",
+    tags: [],
+  });
+  await repo.edit("another", other.id, {
+    revision: 1,
+    content: "别人的第二版",
+    tags: [],
+  });
+  assert.equal(await repo.history("another", mine.id), null);
+  assert.equal(
+    (
+      await repo.restore("another", mine.id, {
+        revision: 2,
+        versionRevision: 1,
+        requestId: crypto.randomUUID(),
+      })
+    ).idea,
+    null,
+  );
+  const missing = await repo.restore("owner", mine.id, {
+    revision: 2,
+    versionRevision: 99,
+    requestId: crypto.randomUUID(),
+  });
+  assert.equal(missing.missingVersion, true);
+  assert.equal(missing.idea.revision, 2);
+  const exported = await repo.export("owner");
+  assert.deepEqual(
+    exported.ideas.map((idea) => idea.id),
+    [mine.id],
+  );
+  assert.deepEqual(
+    exported.history.map((v) => v.idea.id),
+    [mine.id],
+  );
+  assert.doesNotMatch(
+    JSON.stringify(exported),
+    /restore_request_id|analysis_job|owner_id/,
+  );
+  await repo.remove("owner", mine.id);
+  assert.equal(await repo.history("owner", mine.id), null);
+  assert.deepEqual(await repo.export("owner"), { ideas: [], history: [] });
+  assert.equal(
+    sqlite
+      .prepare("SELECT COUNT(*) AS count FROM idea_versions WHERE idea_id = ?")
+      .get(mine.id).count,
+    0,
+  );
+  assert.equal((await repo.history("another", other.id)).versions.length, 1);
+});
+
+test("restoration accepts only a selected version and concurrency token, not client-supplied content", () => {
+  const request = {
+    revision: 2,
+    versionRevision: 1,
+    requestId: crypto.randomUUID(),
+  };
+  assert.equal(ideaRestoreSchema.safeParse(request).success, true);
+  for (const invalid of [
+    { versionRevision: 0 },
+    { versionRevision: 1.2 },
+    { revision: 0 },
+    { requestId: undefined },
+    { requestId: "invalid" },
+    { content: "伪造的历史" },
+    { analysis },
+    { createdAt: "fake" },
+  ])
+    assert.equal(
+      ideaRestoreSchema.safeParse({ ...request, ...invalid }).success,
+      false,
+    );
 });
 
 test("AI configuration requires all values and rejects unsafe or malformed endpoints", () => {

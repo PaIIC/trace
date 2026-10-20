@@ -17,6 +17,7 @@ import {
   Feather,
   FlaskConical,
   Hash,
+  History,
   Lightbulb,
   LoaderCircle,
   Orbit,
@@ -34,6 +35,7 @@ import type { Connection } from "@/lib/connection-types";
 import { api, ApiError } from "@/lib/api-client";
 import { AISettings } from "./ai-settings";
 import { IdeaEditor } from "./idea-editor";
+import { IdeaHistoryDialog } from "./idea-history";
 import {
   ideaTitle,
   isAnalysisRunning,
@@ -76,6 +78,10 @@ export default function Notebook({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Idea | null>(null);
   const editOpen = editTarget !== null;
+  const [historyTarget, setHistoryTarget] = useState<string | null>(null);
+  const historyOpen = historyTarget !== null;
+  const [exporting, setExporting] = useState(false);
+  const exportGuard = useRef(false);
   const [deleteTarget, setDeleteTarget] = useState<Idea | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const deleteOpen = deleteTarget !== null;
@@ -187,7 +193,13 @@ export default function Notebook({
         (event.target as HTMLElement).isContentEditable;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        if (!composerOpen && !settingsOpen && !deleteOpen && !editOpen)
+        if (
+          !composerOpen &&
+          !settingsOpen &&
+          !deleteOpen &&
+          !editOpen &&
+          !historyOpen
+        )
           searchRef.current?.focus();
       }
       if (
@@ -197,7 +209,8 @@ export default function Notebook({
         !event.metaKey &&
         !settingsOpen &&
         !deleteOpen &&
-        !editOpen
+        !editOpen &&
+        !historyOpen
       ) {
         event.preventDefault();
         setComposerOpen(true);
@@ -205,7 +218,7 @@ export default function Notebook({
     };
     window.addEventListener("keydown", shortcuts);
     return () => window.removeEventListener("keydown", shortcuts);
-  }, [composerOpen, settingsOpen, deleteOpen, editOpen]);
+  }, [composerOpen, settingsOpen, deleteOpen, editOpen, historyOpen]);
   const hasProcessing = ideas.some((idea) => isAnalysisRunning(idea));
   useEffect(() => {
     if (!hasProcessing) return;
@@ -447,33 +460,32 @@ export default function Notebook({
     }
   }
 
-  function exportIdeas() {
+  async function exportIdeas() {
     if (!ideas.length) {
       setToast("记录第一条灵感后，就可以导出笔记了");
       return;
     }
-    const blob = new Blob(
-      [
-        JSON.stringify(
-          {
-            app: "研迹 Trace",
-            version: 1,
-            exportedAt: new Date().toISOString(),
-            ideas,
-          },
-          null,
-          2,
-        ),
-      ],
-      { type: "application/json" },
-    );
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `research-trace-${new Date().toISOString().slice(0, 10)}.json`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setToast("已导出全部灵感与分析");
+    if (exportGuard.current) return;
+    exportGuard.current = true;
+    setExporting(true);
+    try {
+      const records = await api("/api/ideas/export");
+      const blob = new Blob([JSON.stringify(records, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `research-trace-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setToast("已导出全部灵感、分析与历史版本");
+    } catch (error) {
+      setToast((error as Error).message);
+    } finally {
+      exportGuard.current = false;
+      setExporting(false);
+    }
   }
 
   return (
@@ -619,7 +631,8 @@ export default function Notebook({
               className="icon-button"
               title="导出全部灵感"
               aria-label="导出全部灵感"
-              onClick={exportIdeas}
+              disabled={exporting}
+              onClick={() => void exportIdeas()}
             >
               <Download size={17} />
             </button>
@@ -674,6 +687,14 @@ export default function Notebook({
                       </span>
                       <Status idea={current} />
                       <div className="detail-actions">
+                        <button
+                          className="card-edit-button"
+                          aria-label="历史版本"
+                          onClick={() => setHistoryTarget(current.id)}
+                        >
+                          <History size={15} />
+                          历史版本
+                        </button>
                         <button
                           className="card-edit-button"
                           aria-label="编辑灵感"
@@ -739,7 +760,9 @@ export default function Notebook({
                       <div className="original-foot">
                         <CheckCheck size={14} />
                         {current.revision > 1
-                          ? "已编辑 · 保留原始记录时间"
+                          ? current.restoredFromRevision
+                            ? `已恢复第 ${current.restoredFromRevision} 版 · 保留原始记录时间`
+                            : "已编辑 · 保留原始记录时间"
                           : "原始记录 · 自动保存时间戳"}
                       </div>
                     </section>
@@ -1151,15 +1174,24 @@ export default function Notebook({
                                         </button>
                                       ))}
                                   </div>
-                                  <button
-                                    className="card-link"
-                                    onClick={() => navigate(idea.id)}
-                                  >
-                                    {idea.status === "completed"
-                                      ? "查看分析"
-                                      : "展开灵感"}
-                                    <ArrowRight size={14} />
-                                  </button>
+                                  <div className="card-footer-links">
+                                    <button
+                                      className="card-link"
+                                      onClick={() => setHistoryTarget(idea.id)}
+                                    >
+                                      <History size={13} />
+                                      历史版本
+                                    </button>
+                                    <button
+                                      className="card-link"
+                                      onClick={() => navigate(idea.id)}
+                                    >
+                                      {idea.status === "completed"
+                                        ? "查看分析"
+                                        : "展开灵感"}
+                                      <ArrowRight size={14} />
+                                    </button>
+                                  </div>
                                 </div>
                                 {idea.analysis && !idea.analysisStale && (
                                   <div className="idea-insight">
@@ -1374,6 +1406,24 @@ export default function Notebook({
         />
       )}
 
+      {historyTarget && (
+        <IdeaHistoryDialog
+          ideaId={historyTarget}
+          onClose={() => {
+            setHistoryTarget(null);
+            void reload();
+          }}
+          onRestored={(idea) => {
+            upsert(idea);
+            setHistoryTarget(null);
+            navigate(idea.id);
+            setToast(
+              `已恢复第 ${idea.restoredFromRevision} 版，恢复前的内容已保留`,
+            );
+          }}
+        />
+      )}
+
       <Dialog
         open={deleteOpen}
         onClose={closeDelete}
@@ -1389,8 +1439,8 @@ export default function Notebook({
           </div>
         )}
         <p>
-          原始内容和对应的 AI
-          分析将一并删除，且无法恢复。你也可以先导出全部笔记。
+          原始内容、AI
+          分析及全部历史版本将一并删除，且无法恢复。你也可以先导出全部笔记。
         </p>
         {deleteError && (
           <p className="form-error" role="alert">

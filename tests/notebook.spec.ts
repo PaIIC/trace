@@ -257,6 +257,7 @@ test("renders structured AI analysis and a retry failure while preserving previo
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     revision: 1,
+    restoredFromRevision: null,
     analysisStale: false,
     bookmarked: false,
     status: "completed",

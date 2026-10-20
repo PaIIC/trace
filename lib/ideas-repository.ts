@@ -3,7 +3,9 @@ import type {
   Idea,
   IdeaEdit,
   IdeaInput,
+  IdeaRestore,
   IdeaStatus,
+  IdeaVersion,
 } from "./domain.ts";
 import { ANALYSIS_LEASE_MS, titleFromContent } from "./domain.ts";
 
@@ -16,6 +18,7 @@ type Row = {
   created_at: string;
   updated_at: string;
   revision: number;
+  restored_from_revision: number | null;
   bookmarked: number;
   status: IdeaStatus;
   analysis: string | null;
@@ -26,6 +29,33 @@ type Row = {
   error: string | null;
 };
 
+type VersionRow = {
+  archived_at: string;
+  snapshot: string;
+};
+
+// Capture values inside the write transaction, including an AI result that may
+// have completed just before the edit. Never serialize the private job token.
+const snapshotColumns = [
+  "id",
+  "title",
+  "content",
+  "tags",
+  "created_at",
+  "updated_at",
+  "revision",
+  "restored_from_revision",
+  "bookmarked",
+  "status",
+  "analysis",
+  "analysis_stale",
+  "analysis_model",
+  "analyzed_at",
+  "analysis_started_at",
+  "error",
+];
+const snapshotSQL = `json_object(${snapshotColumns.map((column) => `'${column}', ${column}`).join(", ")})`;
+
 function fromRow(row: Row): Idea {
   return {
     id: row.id,
@@ -35,6 +65,7 @@ function fromRow(row: Row): Idea {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     revision: row.revision,
+    restoredFromRevision: row.restored_from_revision ?? null,
     bookmarked: !!row.bookmarked,
     status: row.status,
     analysis: row.analysis ? JSON.parse(row.analysis) : null,
@@ -43,6 +74,13 @@ function fromRow(row: Row): Idea {
     analyzedAt: row.analyzed_at,
     analysisStartedAt: row.analysis_started_at,
     error: row.error,
+  };
+}
+
+function fromVersion(row: VersionRow): IdeaVersion {
+  return {
+    idea: fromRow(JSON.parse(row.snapshot)),
+    archivedAt: row.archived_at,
   };
 }
 
@@ -68,6 +106,45 @@ export class IdeaRepository {
       .bind(id, ownerId)
       .first<Row>();
     return row ? fromRow(row) : null;
+  }
+
+  async history(ownerId: string, id: string) {
+    const [current, versions] = await this.db.batch([
+      this.db
+        .prepare("SELECT * FROM ideas WHERE id = ? AND owner_id = ?")
+        .bind(id, ownerId),
+      this.db
+        .prepare(
+          "SELECT archived_at, snapshot FROM idea_versions WHERE idea_id = ? AND owner_id = ? ORDER BY revision DESC",
+        )
+        .bind(id, ownerId),
+    ]);
+    const row = current.results[0] as Row | undefined;
+    return row
+      ? {
+          idea: fromRow(row),
+          versions: (versions.results as VersionRow[]).map(fromVersion),
+        }
+      : null;
+  }
+
+  async export(ownerId: string) {
+    const [ideas, versions] = await this.db.batch([
+      this.db
+        .prepare(
+          "SELECT * FROM ideas WHERE owner_id = ? ORDER BY created_at DESC, id DESC",
+        )
+        .bind(ownerId),
+      this.db
+        .prepare(
+          "SELECT archived_at, snapshot FROM idea_versions WHERE owner_id = ? ORDER BY idea_id, revision DESC",
+        )
+        .bind(ownerId),
+    ]);
+    return {
+      ideas: (ideas.results as Row[]).map(fromRow),
+      history: (versions.results as VersionRow[]).map(fromVersion),
+    };
   }
 
   async create(ownerId: string, input: IdeaInput): Promise<Idea | null> {
@@ -101,30 +178,105 @@ export class IdeaRepository {
 
   async edit(ownerId: string, id: string, input: IdeaEdit) {
     const tags = JSON.stringify([...new Set(input.tags)]);
+    const now = new Date().toISOString();
     // Compare-and-swap protects edits from other tabs. Clearing the job also
     // prevents an analysis of the previous text from being written back later.
-    await this.db
-      .prepare(
-        "UPDATE ideas SET title = ?, content = ?, tags = ?, revision = revision + 1, updated_at = ?, status = 'pending', analysis_stale = CASE WHEN analysis IS NOT NULL THEN 1 ELSE 0 END, analysis_job = NULL, analysis_started_at = NULL, error = NULL WHERE id = ? AND owner_id = ? AND revision = ? AND (content != ? OR tags != ?)",
-      )
-      .bind(
-        titleFromContent(input.content),
-        input.content,
-        tags,
-        new Date().toISOString(),
-        id,
-        ownerId,
-        input.revision,
-        input.content,
-        tags,
-      )
-      .run();
+    await this.db.batch([
+      this.db
+        .prepare(
+          `INSERT INTO idea_versions (idea_id, owner_id, revision, archived_at, snapshot) SELECT id, owner_id, revision, ?, ${snapshotSQL} FROM ideas WHERE id = ? AND owner_id = ? AND revision = ? AND (content != ? OR tags != ?)`,
+        )
+        .bind(now, id, ownerId, input.revision, input.content, tags),
+      this.db
+        .prepare(
+          "UPDATE ideas SET title = ?, content = ?, tags = ?, revision = revision + 1, restored_from_revision = NULL, restore_request_id = NULL, updated_at = ?, status = 'pending', analysis_stale = CASE WHEN analysis IS NOT NULL THEN 1 ELSE 0 END, analysis_job = NULL, analysis_started_at = NULL, error = NULL WHERE id = ? AND owner_id = ? AND revision = ? AND (content != ? OR tags != ?)",
+        )
+        .bind(
+          titleFromContent(input.content),
+          input.content,
+          tags,
+          now,
+          id,
+          ownerId,
+          input.revision,
+          input.content,
+          tags,
+        ),
+    ]);
     const idea = await this.find(ownerId, id);
     // Retrying an identical save after losing its response is safe.
     const conflict =
       !!idea &&
       (idea.content !== input.content || JSON.stringify(idea.tags) !== tags);
     return { idea, conflict };
+  }
+
+  async restore(ownerId: string, id: string, input: IdeaRestore) {
+    const version = await this.db
+      .prepare(
+        "SELECT archived_at, snapshot FROM idea_versions WHERE idea_id = ? AND owner_id = ? AND revision = ?",
+      )
+      .bind(id, ownerId, input.versionRevision)
+      .first<VersionRow>();
+    if (!version)
+      return {
+        idea: await this.find(ownerId, id),
+        conflict: false,
+        missingVersion: true,
+      };
+    const saved = fromVersion(version).idea;
+    // Historical processing jobs cannot be resumed. Restore their saved output,
+    // if any, and allow a new analysis to be requested on the restored text.
+    const status =
+      saved.status === "processing"
+        ? saved.analysis && !saved.analysisStale
+          ? "completed"
+          : "pending"
+        : saved.status;
+    const now = new Date().toISOString();
+    await this.db.batch([
+      this.db
+        .prepare(
+          `INSERT INTO idea_versions (idea_id, owner_id, revision, archived_at, snapshot) SELECT id, owner_id, revision, ?, ${snapshotSQL} FROM ideas WHERE id = ? AND owner_id = ? AND revision = ?`,
+        )
+        .bind(now, id, ownerId, input.revision),
+      this.db
+        .prepare(
+          "UPDATE ideas SET title = ?, content = ?, tags = ?, revision = revision + 1, restored_from_revision = ?, restore_request_id = ?, updated_at = ?, status = ?, analysis = ?, analysis_stale = ?, analysis_model = ?, analyzed_at = ?, error = ?, analysis_job = NULL, analysis_started_at = NULL WHERE id = ? AND owner_id = ? AND revision = ?",
+        )
+        .bind(
+          saved.title,
+          saved.content,
+          JSON.stringify(saved.tags),
+          input.versionRevision,
+          input.requestId,
+          now,
+          status,
+          saved.analysis ? JSON.stringify(saved.analysis) : null,
+          Number(saved.analysisStale),
+          saved.analysisModel,
+          saved.analyzedAt,
+          saved.status === "processing" ? null : saved.error,
+          id,
+          ownerId,
+          input.revision,
+        ),
+    ]);
+    const current = await this.db
+      .prepare("SELECT * FROM ideas WHERE id = ? AND owner_id = ?")
+      .bind(id, ownerId)
+      .first<Row & { restore_request_id: string | null }>();
+    return {
+      idea: current ? fromRow(current) : null,
+      conflict:
+        !!current &&
+        !(
+          current.restore_request_id === input.requestId &&
+          current.restored_from_revision === input.versionRevision &&
+          current.revision === input.revision + 1
+        ),
+      missingVersion: false,
+    };
   }
 
   async remove(ownerId: string, id: string) {

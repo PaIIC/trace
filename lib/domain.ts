@@ -18,6 +18,14 @@ export const ideaEditSchema = ideaInputSchema
   .extend({ revision: z.number().int().min(1) })
   .strict();
 
+export const ideaRestoreSchema = z
+  .object({
+    versionRevision: z.number().int().min(1),
+    revision: z.number().int().min(1),
+    requestId: z.string().uuid(),
+  })
+  .strict();
+
 export const analysisSchema = z.object({
   title: z.string().trim().min(1).max(100),
   summary: z.string().trim().min(1).max(2000),
@@ -31,6 +39,7 @@ export const analysisSchema = z.object({
 export type Analysis = z.infer<typeof analysisSchema>;
 export type IdeaInput = z.infer<typeof ideaInputSchema>;
 export type IdeaEdit = z.infer<typeof ideaEditSchema>;
+export type IdeaRestore = z.infer<typeof ideaRestoreSchema>;
 export type IdeaStatus = "pending" | "processing" | "completed" | "failed";
 export interface Idea {
   id: string;
@@ -40,6 +49,7 @@ export interface Idea {
   createdAt: string;
   updatedAt: string;
   revision: number;
+  restoredFromRevision: number | null;
   bookmarked: boolean;
   status: IdeaStatus;
   analysis: Analysis | null;
@@ -48,6 +58,16 @@ export interface Idea {
   analyzedAt: string | null;
   analysisStartedAt: string | null;
   error: string | null;
+}
+
+export interface IdeaVersion {
+  idea: Idea;
+  archivedAt: string;
+}
+
+export interface IdeaHistory {
+  idea: Idea;
+  versions: IdeaVersion[];
 }
 
 export function ideaTitle(idea: Idea): string {

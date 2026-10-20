@@ -17,7 +17,7 @@
     "test:workers": "node --test tests/worker-ai.test.mjs",
     "test:e2e": "playwright test",
     "db:setup": "node scripts/setup-db.mjs",
-    "format": "prettier --write app components/notebook.tsx components/notebook-parts.tsx components/ai-settings.tsx components/idea-editor.tsx lib/ai*.ts lib/connection-types.ts lib/api-client.ts lib/domain.ts lib/server.ts lib/ideas-repository.ts db/schema.ts tests playwright.config.ts README.md"
+    "format": "prettier --write app components/notebook.tsx components/notebook-parts.tsx components/ai-settings.tsx components/idea-editor.tsx components/idea-history.tsx lib/ai*.ts lib/connection-types.ts lib/api-client.ts lib/domain.ts lib/server.ts lib/ideas-repository.ts db/schema.ts tests playwright.config.ts README.md"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
