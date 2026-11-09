@@ -33,7 +33,7 @@
 将下面的示例路径换成包含 `package.json` 的项目目录。`npm run install:ci` 会安装当前系统和芯片所需的依赖；从 Linux 换到 Mac 时也要重新安装，不要复制 `node_modules`。
 
 ```bash
-cd /home/yifan_wsl/rescnote/trace
+cd /path/to/trace
 npm run install:ci
 npm run build
 npm run db:setup
