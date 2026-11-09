@@ -19,11 +19,22 @@
 
 ## 本地运行
 
-需要 Node.js **22.13 或以上**。所有命令都在本项目目录运行。
+本地运行需要 Node.js **22.13.0 或以上**和 npm。
+
+### macOS 环境准备
+
+项目锁定的依赖同时提供 Apple 芯片（M 系列，arm64）和 Intel（x64）的 macOS 版本。两者均可按下方步骤从源码启动，再用浏览器访问。目前没有 `.app` 或 `.dmg` 安装包，尚未在 macOS 实机验证。
+
+- **系统和命令行工具**：按项目所用版本的 [Cloudflare workerd 运行要求](https://github.com/cloudflare/workerd/blob/v1.20260515.1/README.md#running-workerd)，需要 **macOS 13.5 或以上**和 Xcode 命令行工具。在终端运行 `xcode-select -p` 检查；若提示未安装，运行 `xcode-select --install` 并按提示完成安装。
+- **Node.js 与 npm**：选择与 Mac 芯片匹配的 Node.js 版本。安装后运行 `node -v` 和 `npm -v` 确认两者可用。
+
+### 首次启动（macOS 和 Linux）
+
+将下面的示例路径换成包含 `package.json` 的项目目录。`npm run install:ci` 会安装当前系统和芯片所需的依赖；从 Linux 换到 Mac 时也要重新安装，不要复制 `node_modules`。
 
 ```bash
 cd /home/yifan_wsl/rescnote/trace
-npm ci
+npm run install:ci
 npm run build
 npm run db:setup
 npm run dev -- --port 5173 --hostname 127.0.0.1
@@ -31,7 +42,7 @@ npm run dev -- --port 5173 --hostname 127.0.0.1
 
 打开 <http://127.0.0.1:5173/>。首次本地访问会由开发环境完成模拟登录，无需另行创建账号。本地开发服务只监听回环地址，请勿直接暴露到公网。
 
-`db:setup` **仅在第一次创建空数据库时运行**，会依次应用所有迁移。本次开发已完成数据库初始化、AI 连接表、编辑字段和历史版本表升级，直接执行 `npm run dev -- --port 5173 --hostname 127.0.0.1` 即可再次启动。已有数据库上重复执行初始建表会提示表已存在，不会删除数据。后续新增结构应生成新的迁移并按顺序应用，不能重放已经执行的迁移。
+`db:setup` **仅在第一次创建空数据库时运行**。以后启动只需执行上面的最后一条命令。如果要把已有笔记迁到 Mac，先停止旧电脑上的服务，将 `.wrangler/state/` 和 `.dev.vars` 一起复制到新项目的相同位置，再安装依赖、构建并启动，跳过 `db:setup`。旧版本数据库只需按顺序应用尚未执行的迁移。
 
 如果从旧版本升级且数据库尚未包含 `ai_connections` 表，先构建，再只应用新增迁移：
 
