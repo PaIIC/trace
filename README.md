@@ -19,30 +19,82 @@
 
 ## 本地运行
 
-本地运行需要 Node.js **22.13.0 或以上**和 npm。
+本地运行需要 **Node.js 22.13.0 或以上**和 npm。以下以 Node.js 22.x 最新补丁版为例；如果已经装好符合要求的版本，可以跳过 Node.js 安装步骤。首次建空库时才运行 `db:setup`；如果要沿用旧电脑的笔记，请先看[迁移已有笔记](#迁移已有笔记)。
 
-### macOS 环境准备
+### Windows 11：用 PowerShell 在本机运行（已验证）
 
-项目锁定的依赖同时提供 Apple 芯片（M 系列，arm64）和 Intel（x64）的 macOS 版本。两者均可按下方步骤从源码启动，再用浏览器访问。目前没有 `.app` 或 `.dmg` 安装包，尚未在 macOS 实机验证。
+以下步骤适用于 Intel 或 AMD 的 x64 电脑，无需 WSL。
 
-- **系统和命令行工具**：按项目所用版本的 [Cloudflare workerd 运行要求](https://github.com/cloudflare/workerd/blob/v1.20260515.1/README.md#running-workerd)，需要 **macOS 13.5 或以上**和 Xcode 命令行工具。在终端运行 `xcode-select -p` 检查；若提示未安装，运行 `xcode-select --install` 并按提示完成安装。
-- **Node.js 与 npm**：选择与 Mac 芯片匹配的 Node.js 版本。安装后运行 `node -v` 和 `npm -v` 确认两者可用。
+1. 打开 [Node.js 官方下载页](https://nodejs.org/en/download)，选择 **22.x → Windows → x64**，下载 Windows Installer（`.msi`）。双击安装，保留默认的 npm 和 PATH 选项。安装后重新打开 PowerShell，执行：
+
+   ```powershell
+   node -v
+   npm.cmd -v
+   ```
+
+   两条命令都应显示版本号。下文使用 `npm.cmd`，无需更改 PowerShell 脚本执行策略。
+
+2. 在[项目仓库](https://github.com/PaIIC/trace)点击 **Code → Download ZIP** 并解压，或使用已有的 Git 工作目录。在资源管理器中打开能看到 `package.json` 的文件夹，点击地址栏，输入 `powershell` 并回车；新窗口会直接进入该目录。
+
+3. 在这个 PowerShell 窗口逐行执行，等上一条成功后再运行下一条：
+
+   ```powershell
+   npm.cmd run install:ci
+   npm.cmd run build
+   npm.cmd run db:setup  # 仅首次创建空数据库时执行
+   npm.cmd run dev -- --port 5173 --hostname 127.0.0.1
+   ```
+
+4. 保持窗口开启，在浏览器打开 <http://127.0.0.1:5173/>。按 `Ctrl+C` 停止服务；下次在同一目录只需执行最后一条 `npm.cmd run dev` 命令（含端口和地址参数）。
+
+如果启动时提示缺少 `VCRUNTIME140.dll` 或 `MSVCP140.dll`，安装[微软官方 Visual C++ x64 运行库](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)后重试报错的步骤。
+
+### Linux：安装 Node.js
+
+项目所用的 [Cloudflare workerd](https://github.com/cloudflare/workerd/blob/v1.20260515.1/README.md#running-workerd) 在 Linux 上要求 glibc 2.35 或以上，例如 Ubuntu 22.04 或 Debian 12。以下命令适用于 Bash，使用 [nvm](https://github.com/nvm-sh/nvm/blob/v0.40.3/README.md#installing-and-updating) 将 Node.js 和 npm 安装到当前用户目录。
+
+1. 如果尚未安装 nvm，运行以下命令，然后关闭并重新打开终端。如果提示找不到 `curl`，在 Ubuntu 或 Debian 上可先运行 `sudo apt update && sudo apt install curl ca-certificates`。
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+   ```
+
+2. 在重新打开的终端中安装并选用 Node.js 22，然后检查版本：
+
+   ```bash
+   nvm install 22
+   nvm use 22
+   node -v
+   npm -v
+   ```
+
+   `node -v` 应显示 `v22.13.0` 或更高版本，`npm -v` 应显示版本号。如果你用 nvm 管理多个 Node.js 版本，在新终端启动本项目前可再次执行 `nvm use 22`。
+
+### macOS：安装 Node.js 和命令行工具
+
+项目依赖提供 Apple 芯片（M 系列，arm64）和 Intel（x64）版本；项目本身尚未在 macOS 实机验证，也没有可双击启动的应用安装包。
+
+1. 确认系统为 **macOS 13.5 或以上**。在终端运行 `xcode-select -p` 检查 Xcode 命令行工具；若提示未安装，运行 `xcode-select --install` 并按弹窗提示完成安装。无需安装完整的 Xcode。详见 [workerd 的运行要求](https://github.com/cloudflare/workerd/blob/v1.20260515.1/README.md#running-workerd)。
+2. 在 [Node.js 官方下载页](https://nodejs.org/en/download)选择 **22.x → macOS**，下载 macOS Installer（`.pkg`）并按向导安装，它会同时安装 npm。如果需要选择架构，M 系列选 ARM64，Intel 选 x64。
+3. 重新打开终端，分别运行 `node -v` 和 `npm -v`。两条命令都显示版本号后，继续下面的首次启动步骤。
 
 ### 首次启动（macOS 和 Linux）
 
-将下面的示例路径换成包含 `package.json` 的项目目录。`npm run install:ci` 会安装当前系统和芯片所需的依赖；从 Linux 换到 Mac 时也要重新安装，不要复制 `node_modules`。
+下载或克隆[项目源码](https://github.com/PaIIC/trace)，将下面的示例路径换成包含 `package.json` 的实际目录。在终端逐行执行：
 
 ```bash
-cd /path/to/trace
+cd "/path/to/trace"
 npm run install:ci
 npm run build
-npm run db:setup
+npm run db:setup  # 仅首次创建空数据库时执行
 npm run dev -- --port 5173 --hostname 127.0.0.1
 ```
 
-打开 <http://127.0.0.1:5173/>。首次本地访问会由开发环境完成模拟登录，无需另行创建账号。本地开发服务只监听回环地址，请勿直接暴露到公网。
+在浏览器打开 <http://127.0.0.1:5173/>。按 `Ctrl+C` 停止服务；以后在同一目录只需执行最后一条启动命令。各平台首次本地访问都会自动完成模拟登录，无需另行创建账号。服务只监听本机地址，请勿直接暴露到公网。
 
-`db:setup` **仅在第一次创建空数据库时运行**。以后启动只需执行上面的最后一条命令。如果要把已有笔记迁到 Mac，先停止旧电脑上的服务，将 `.wrangler/state/` 和 `.dev.vars` 一起复制到新项目的相同位置，再安装依赖、构建并启动，跳过 `db:setup`。旧版本数据库只需按顺序应用尚未执行的迁移。
+### 迁移已有笔记
+
+换电脑或操作系统时，先停止旧电脑上的服务，再把项目里的 `.wrangler/state/`（笔记、分析和历史版本）和 `.dev.vars`（解密已保存的 AI 连接所需的密钥）一起复制到新项目的相同位置。不要复制旧的 `node_modules`；在新电脑上按对应平台的步骤重新安装依赖、构建，并**跳过 `db:setup`**。同版本可以直接启动，旧版本数据库只需按顺序应用尚未执行的迁移。
 
 如果从旧版本升级且数据库尚未包含 `ai_connections` 表，先构建，再只应用新增迁移：
 
@@ -79,7 +131,7 @@ node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1
 
 网页填写的密钥通过同源 API 发送到服务端，使用 AES-GCM 加密后按当前用户保存到数据库。读取配置只返回模型、来源和密钥尾号，不回传完整密钥或密文。密钥不进入浏览器存储、灵感导出文件或 Git。关闭设置会清空尚未保存的密钥输入。生成分析时，原始灵感内容会发送给 DeepSeek。
 
-本地启动会自动生成 `AI_SETTINGS_ENCRYPTION_KEY` 并保存在被 Git 忽略的 `.dev.vars` 中，文件权限为仅当前用户可读写。**不要覆盖或删除该加密密钥**；迁移数据库时同时妥善备份它，否则需在网页重新填写 DeepSeek 密钥。托管部署需由部署者预先设置一个随机的 64 位十六进制 `AI_SETTINGS_ENCRYPTION_KEY` 平台密钥；不得使用 `NEXT_PUBLIC_` / `VITE_` 前缀或提交到代码仓库。
+本地启动会自动生成 `AI_SETTINGS_ENCRYPTION_KEY` 并保存在被 Git 忽略的 `.dev.vars` 中。Linux 和 macOS 上该文件仅当前用户可读写；Windows 上由文件的访问权限决定。**不要覆盖或删除该加密密钥**；迁移数据库时同时妥善备份它，否则需在网页重新填写 DeepSeek 密钥。托管部署需由部署者预先设置一个随机的 64 位十六进制 `AI_SETTINGS_ENCRYPTION_KEY` 平台密钥；不得使用 `NEXT_PUBLIC_` / `VITE_` 前缀或提交到代码仓库。
 
 ### 其他 OpenAI 兼容服务（可选）
 
@@ -191,7 +243,7 @@ git status
 git log --oneline
 ```
 
-数据库、密钥、依赖、构建输出和浏览器测试产物均被忽略。当前仅有本地 Git 历史，未配置个人 GitHub 远程仓库。
+数据库、密钥、依赖、构建输出和浏览器测试产物均被 Git 忽略，不随项目源码分发。
 
 `.openai/hosting.json` 已声明 D1 绑定 `DB`。Sites 托管应使用私有站点，在平台配置上述加密密钥后即可在网页填写 DeepSeek 连接；其他兼容服务仍可使用平台环境变量。保留平台认证头与每条记录的用户隔离。平台会应用已提交的数据库迁移。
 
