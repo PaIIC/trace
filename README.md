@@ -21,9 +21,9 @@
 
 本地运行需要 **Node.js 22.13.0 或以上**和 npm。以下以 Node.js 22.x 最新补丁版为例；如果已经装好符合要求的版本，可以跳过 Node.js 安装步骤。首次建空库时才运行 `db:setup`；如果要沿用旧电脑的笔记，请先看[迁移已有笔记](#迁移已有笔记)。
 
-### Windows 11：用 PowerShell 在本机运行（已验证）
+### Windows 11: 安装依赖环境和运行
 
-以下步骤适用于 Intel 或 AMD 的 x64 电脑，无需 WSL。
+以下步骤适用于 Intel 或 AMD 的 x64 电脑。
 
 1. 打开 [Node.js 官方下载页](https://nodejs.org/en/download)，选择 **22.x → Windows → x64**，下载 Windows Installer（`.msi`）。双击安装，保留默认的 npm 和 PATH 选项。安装后重新打开 PowerShell，执行：
 
@@ -32,9 +32,7 @@
    npm.cmd -v
    ```
 
-   两条命令都应显示版本号。下文使用 `npm.cmd`，无需更改 PowerShell 脚本执行策略。
-
-2. 在[项目仓库](https://github.com/PaIIC/trace)点击 **Code → Download ZIP** 并解压，或使用已有的 Git 工作目录。在资源管理器中打开能看到 `package.json` 的文件夹，点击地址栏，输入 `powershell` 并回车；新窗口会直接进入该目录。
+2. 在[项目仓库](https://github.com/PaIIC/trace)点击 **Code → Download ZIP** 并解压，或使用已有的 Git 工作目录。
 
 3. 在这个 PowerShell 窗口逐行执行，等上一条成功后再运行下一条：
 
@@ -71,8 +69,6 @@
    `node -v` 应显示 `v22.13.0` 或更高版本，`npm -v` 应显示版本号。如果你用 nvm 管理多个 Node.js 版本，在新终端启动本项目前可再次执行 `nvm use 22`。
 
 ### macOS：安装 Node.js 和命令行工具
-
-项目依赖提供 Apple 芯片（M 系列，arm64）和 Intel（x64）版本；项目本身尚未在 macOS 实机验证，也没有可双击启动的应用安装包。
 
 1. 确认系统为 **macOS 13.5 或以上**。在终端运行 `xcode-select -p` 检查 Xcode 命令行工具；若提示未安装，运行 `xcode-select --install` 并按弹窗提示完成安装。无需安装完整的 Xcode。详见 [workerd 的运行要求](https://github.com/cloudflare/workerd/blob/v1.20260515.1/README.md#running-workerd)。
 2. 在 [Node.js 官方下载页](https://nodejs.org/en/download)选择 **22.x → macOS**，下载 macOS Installer（`.pkg`）并按向导安装，它会同时安装 npm。如果需要选择架构，M 系列选 ARM64，Intel 选 x64。
